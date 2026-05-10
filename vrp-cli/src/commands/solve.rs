@@ -473,12 +473,9 @@ pub fn create_interruption_quota(max_time: Option<usize>) -> Arc<dyn Quota> {
 }
 
 fn apply_fixed_cost(problem: Problem, matches: &ArgMatches) -> GenericResult<Problem> {
-    let Some(fixed_cost) = matches.get_one::<String>(FIXED_COST_ARG_NAME) else {
+    let Some(&fixed) = matches.get_one::<Float>(FIXED_COST_ARG_NAME) else {
         return Ok(problem);
     };
-
-    let fixed =
-        fixed_cost.parse::<Float>().map_err(|err| GenericError::from(format!("cannot parse fixed cost: '{err}'")))?;
 
     let vehicles = problem
         .fleet
