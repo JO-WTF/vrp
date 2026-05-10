@@ -176,6 +176,8 @@ pub fn get_solve_app() -> Command {
             Arg::new(FIXED_COST_ARG_NAME)
                 .help("Overrides fixed vehicle cost for all vehicles")
                 .long(FIXED_COST_ARG_NAME)
+                .visible_alias("fixed_cost")
+                .value_parser(clap::value_parser!(Float))
                 .required(false)
         )
         .arg(
@@ -475,9 +477,8 @@ fn apply_fixed_cost(problem: Problem, matches: &ArgMatches) -> GenericResult<Pro
         return Ok(problem);
     };
 
-    let fixed = fixed_cost
-        .parse::<Float>()
-        .map_err(|err| GenericError::from(format!("cannot parse fixed cost: '{err}'")))?;
+    let fixed =
+        fixed_cost.parse::<Float>().map_err(|err| GenericError::from(format!("cannot parse fixed cost: '{err}'")))?;
 
     let vehicles = problem
         .fleet
