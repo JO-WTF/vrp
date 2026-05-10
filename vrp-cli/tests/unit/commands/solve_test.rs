@@ -96,6 +96,12 @@ fn can_specify_experimental_setting() {
     get_solve_app().try_get_matches_from(args).unwrap();
 }
 
+
+#[test]
+fn can_specify_fixed_cost_setting() {
+    let args = vec!["solve", "solomon", SOLOMON_PROBLEM_PATH, "--fixed_cost", "10.5"];
+    get_solve_app().try_get_matches_from(args).unwrap();
+}
 #[test]
 fn can_specify_round_setting() {
     let args = vec!["solve", "solomon", SOLOMON_PROBLEM_PATH, "--round"];
