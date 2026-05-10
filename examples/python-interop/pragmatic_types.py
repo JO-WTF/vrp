@@ -3,8 +3,22 @@
 
 from __future__ import annotations
 from pydantic.dataclasses import dataclass
+try:
+    from pydantic.dataclasses import rebuild_dataclass
+except ImportError:
+    rebuild_dataclass = None
 from typing import List, Optional
 from datetime import datetime
+
+
+def _update_forward_refs(*classes):
+    for cls in classes:
+        model = getattr(cls, "__pydantic_model__", None)
+
+        if model is not None:
+            model.update_forward_refs(**globals())
+        elif rebuild_dataclass is not None:
+            rebuild_dataclass(cls, _types_namespace=globals())
 
 
 # Routing matrix
@@ -143,22 +157,21 @@ class ObjectiveOptions:
     threshold: float
 
 
-Problem.__pydantic_model__.update_forward_refs()
-
-Plan.__pydantic_model__.update_forward_refs()
-Job.__pydantic_model__.update_forward_refs()
-JobTask.__pydantic_model__.update_forward_refs()
-JobPlace.__pydantic_model__.update_forward_refs()
-
-Fleet.__pydantic_model__.update_forward_refs()
-VehicleReload.__pydantic_model__.update_forward_refs()
-VehicleType.__pydantic_model__.update_forward_refs()
-VehicleShift.__pydantic_model__.update_forward_refs()
-VehicleShiftStart.__pydantic_model__.update_forward_refs()
-VehicleShiftEnd.__pydantic_model__.update_forward_refs()
-VehicleBreak.__pydantic_model__.update_forward_refs()
-
-Objective.__pydantic_model__.update_forward_refs()
+_update_forward_refs(
+    Problem,
+    Plan,
+    Job,
+    JobTask,
+    JobPlace,
+    Fleet,
+    VehicleReload,
+    VehicleType,
+    VehicleShift,
+    VehicleShiftStart,
+    VehicleShiftEnd,
+    VehicleBreak,
+    Objective,
+)
 
 
 # Solution
@@ -225,8 +238,10 @@ class Time:
     end: datetime
 
 
-Solution.__pydantic_model__.update_forward_refs()
-Statistic.__pydantic_model__.update_forward_refs()
-Tour.__pydantic_model__.update_forward_refs()
-Stop.__pydantic_model__.update_forward_refs()
-Activity.__pydantic_model__.update_forward_refs()
+_update_forward_refs(
+    Solution,
+    Statistic,
+    Tour,
+    Stop,
+    Activity,
+)

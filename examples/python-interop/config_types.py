@@ -3,7 +3,21 @@
 
 from __future__ import annotations
 from pydantic.dataclasses import dataclass
+try:
+    from pydantic.dataclasses import rebuild_dataclass
+except ImportError:
+    rebuild_dataclass = None
 from typing import Optional
+
+
+def _update_forward_refs(*classes):
+    for cls in classes:
+        model = getattr(cls, "__pydantic_model__", None)
+
+        if model is not None:
+            model.update_forward_refs(**globals())
+        elif rebuild_dataclass is not None:
+            rebuild_dataclass(cls, _types_namespace=globals())
 
 
 @dataclass
@@ -19,7 +33,7 @@ class Progress:
     dumpPopulation: bool
 
 
-Telemetry.__pydantic_model__.update_forward_refs()
+_update_forward_refs(Telemetry)
 
 
 @dataclass
@@ -47,7 +61,7 @@ class Logging:
     enabled: bool
 
 
-Logging.__pydantic_model__.update_forward_refs()
+_update_forward_refs(Logging)
 
 
 @dataclass
@@ -56,7 +70,4 @@ class Environment:
     isExperimental: Optional[bool] = None
 
 
-Config.__pydantic_model__.update_forward_refs()
-Telemetry.__pydantic_model__.update_forward_refs()
-Termination.__pydantic_model__.update_forward_refs()
-Environment.__pydantic_model__.update_forward_refs()
+_update_forward_refs(Config, Telemetry, Termination, Environment)

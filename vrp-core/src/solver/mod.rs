@@ -86,6 +86,9 @@ pub mod search;
 mod heuristic;
 pub use self::heuristic::*;
 
+/// A callback invoked with the best known solution at a specific generation.
+pub type IterationCallback = Arc<dyn Fn(usize, Solution) + Send + Sync>;
+
 /// A type which encapsulates information needed to perform a solution refinement process.
 pub struct RefinementContext {
     /// Original problem definition.
@@ -98,6 +101,8 @@ pub struct RefinementContext {
     initial_footprint: Footprint,
     /// Provides some basic implementation of context functionality.
     inner_context: TelemetryHeuristicContext<GoalContext, InsertionContext>,
+    /// An optional callback called with best known solution each configured amount of generations.
+    iteration_callback: Option<(usize, IterationCallback)>,
 }
 
 /// Defines instant refinement speed type.
@@ -121,7 +126,23 @@ impl RefinementContext {
         let initial_footprint = Footprint::new(&problem);
         let inner_context =
             TelemetryHeuristicContext::new(problem.goal.clone(), population, telemetry_mode, environment.clone());
-        Self { problem, environment, inner_context, state: Default::default(), initial_footprint }
+        Self {
+            problem,
+            environment,
+            inner_context,
+            state: Default::default(),
+            initial_footprint,
+            iteration_callback: None,
+        }
+    }
+
+    /// Sets a callback to be called each `every` generations with the best known solution.
+    pub fn with_iteration_callback(mut self, every: usize, callback: IterationCallback) -> Self {
+        if every > 0 {
+            self.iteration_callback = Some((every, callback));
+        }
+
+        self
     }
 
     /// Consumes context and returns all individuals.
@@ -171,7 +192,16 @@ impl HeuristicContext for RefinementContext {
     }
 
     fn on_generation(&mut self, offspring: Vec<Self::Solution>, termination_estimate: Float, generation_time: Timer) {
-        self.inner_context.on_generation(offspring, termination_estimate, generation_time)
+        self.inner_context.on_generation(offspring, termination_estimate, generation_time);
+
+        if let Some((every, callback)) = &self.iteration_callback {
+            let generation = self.inner_context.statistics().generation;
+            if generation > 0 && generation.is_multiple_of(*every) {
+                if let Some(best) = self.inner_context.ranked().next() {
+                    callback(generation, best.deep_copy().into());
+                }
+            }
+        }
     }
 
     fn on_result(self) -> HeuristicResult<Self::Objective, Self::Solution> {
