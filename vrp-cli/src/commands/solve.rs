@@ -41,7 +41,7 @@ const PARALLELISM_ARG_NAME: &str = "parallelism";
 const HEURISTIC_ARG_NAME: &str = "heuristic";
 const EXPERIMENTAL_ARG_NAME: &str = "experimental";
 const ROUNDED_ARG_NAME: &str = "round";
-const FIXED_COST_ARG_NAME: &str = "fixed_cost";
+const FIXED_COST_ARG_NAME: &str = "fixed-cost";
 
 pub fn get_solve_app() -> Command {
     Command::new("solve")
