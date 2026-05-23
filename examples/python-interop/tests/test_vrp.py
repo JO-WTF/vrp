@@ -13,6 +13,8 @@ from vrp import (
     Hyper,
     InitialSolution,
     LocalOperator,
+    MatrixCollection,
+    Objective,
     Population,
     Probability,
     Problem,
@@ -20,6 +22,8 @@ from vrp import (
     RoutingMatrix,
     Ruin,
     Solution,
+    StopView,
+    TourView,
     min_max,
     noise,
     solve,
@@ -275,6 +279,219 @@ class ProblemBuilderTest(unittest.TestCase):
         objectives = problem.to_dict().get("objectives")
         self.assertEqual(len(objectives), 2)
 
+    # ---- Service job ----
+
+    def test_add_service_job(self):
+        problem = Problem.empty().add_service(
+            "s1", (52.0, 13.0), duration=120,
+            times=[["2020-01-01T09:00:00Z", "2020-01-01T17:00:00Z"]],
+        )
+        job = problem.to_dict()["plan"]["jobs"][0]
+        self.assertEqual(job["id"], "s1")
+        self.assertIn("services", job)
+        place = job["services"][0]["places"][0]
+        self.assertEqual(place["duration"], 120)
+        self.assertIn("times", place)
+
+    def test_add_service_job_minimal(self):
+        problem = Problem.empty().add_service("s2", (1.0, 2.0))
+        job = problem.to_dict()["plan"]["jobs"][0]
+        self.assertIn("services", job)
+        self.assertEqual(job["services"][0]["places"][0]["duration"], 0)
+
+    # ---- Job decorators ----
+
+    def test_set_job_skills(self):
+        problem = (
+            Problem.empty()
+            .add_delivery("d1", (1.0, 2.0), [1])
+            .set_job_skills("d1", all_of=["crane"], none_of=["fragile"])
+        )
+        skills = problem.to_dict()["plan"]["jobs"][0]["skills"]
+        self.assertEqual(skills["allOf"], ["crane"])
+        self.assertEqual(skills["noneOf"], ["fragile"])
+
+    def test_set_job_skills_one_of(self):
+        problem = (
+            Problem.empty()
+            .add_delivery("d1", (1.0, 2.0), [1])
+            .set_job_skills("d1", one_of=["car", "truck"])
+        )
+        skills = problem.to_dict()["plan"]["jobs"][0]["skills"]
+        self.assertEqual(skills["oneOf"], ["car", "truck"])
+        self.assertNotIn("allOf", skills)
+
+    def test_set_job_priority(self):
+        problem = (
+            Problem.empty()
+            .add_delivery("d1", (1.0, 2.0), [1])
+            .set_job_priority("d1", 1)
+        )
+        self.assertEqual(problem.to_dict()["plan"]["jobs"][0]["priority"], 1)
+
+    def test_set_job_value(self):
+        problem = (
+            Problem.empty()
+            .add_delivery("d1", (1.0, 2.0), [1])
+            .set_job_value("d1", 50.0)
+        )
+        self.assertEqual(problem.to_dict()["plan"]["jobs"][0]["value"], 50.0)
+
+    def test_set_job_skills_raises_for_unknown_id(self):
+        with self.assertRaises(KeyError):
+            Problem.empty().set_job_skills("nonexistent", all_of=["x"])
+
+    def test_set_job_priority_raises_for_unknown_id(self):
+        with self.assertRaises(KeyError):
+            Problem.empty().set_job_priority("nonexistent", 1)
+
+    # ---- Vehicle advanced helpers ----
+
+    def _base_vehicle_problem(self, type_id: str = "v") -> Problem:
+        return Problem.empty().add_vehicle(
+            type_id,
+            type_id=type_id,
+            start_location=(0.0, 0.0),
+            start_earliest="2020-01-01T08:00:00Z",
+            end_latest="2020-01-01T20:00:00Z",
+            capacity=[100],
+        )
+
+    def test_add_vehicle_break(self):
+        problem = self._base_vehicle_problem().add_vehicle_break(
+            "v",
+            times=[["2020-01-01T12:00:00Z", "2020-01-01T13:00:00Z"]],
+            duration=3600,
+        )
+        shift = problem.to_dict()["fleet"]["vehicles"][0]["shifts"][0]
+        self.assertIn("breaks", shift)
+        brk = shift["breaks"][0]
+        self.assertEqual(brk["duration"], 3600)
+        self.assertIn("times", brk["time"])
+
+    def test_add_vehicle_break_with_locations(self):
+        problem = self._base_vehicle_problem().add_vehicle_break(
+            "v",
+            times=[["2020-01-01T12:00:00Z", "2020-01-01T13:00:00Z"]],
+            duration=1800,
+            locations=[(52.5, 13.4)],
+        )
+        brk = problem.to_dict()["fleet"]["vehicles"][0]["shifts"][0]["breaks"][0]
+        self.assertIn("places", brk)
+        self.assertEqual(brk["places"][0]["location"]["lat"], 52.5)
+
+    def test_add_multiple_breaks(self):
+        problem = (
+            self._base_vehicle_problem()
+            .add_vehicle_break("v", times=[["2020-01-01T10:00:00Z", "2020-01-01T11:00:00Z"]], duration=600)
+            .add_vehicle_break("v", times=[["2020-01-01T14:00:00Z", "2020-01-01T15:00:00Z"]], duration=600)
+        )
+        breaks = problem.to_dict()["fleet"]["vehicles"][0]["shifts"][0]["breaks"]
+        self.assertEqual(len(breaks), 2)
+
+    def test_add_vehicle_reload(self):
+        problem = self._base_vehicle_problem().add_vehicle_reload(
+            "v",
+            (51.0, 10.0),
+            duration=600,
+            times=[["2020-01-01T10:00:00Z", "2020-01-01T18:00:00Z"]],
+            tag="depot",
+        )
+        shift = problem.to_dict()["fleet"]["vehicles"][0]["shifts"][0]
+        self.assertIn("reloads", shift)
+        reload = shift["reloads"][0]
+        self.assertEqual(reload["location"]["lat"], 51.0)
+        self.assertEqual(reload["tag"], "depot")
+
+    def test_add_vehicle_reload_minimal(self):
+        problem = self._base_vehicle_problem().add_vehicle_reload("v", (1.0, 2.0))
+        reload = problem.to_dict()["fleet"]["vehicles"][0]["shifts"][0]["reloads"][0]
+        self.assertEqual(reload["duration"], 0)
+        self.assertNotIn("tag", reload)
+
+    def test_set_vehicle_limits_all_fields(self):
+        problem = self._base_vehicle_problem().set_vehicle_limits(
+            "v", max_distance=100000, max_duration=36000, tour_size=20
+        )
+        limits = problem.to_dict()["fleet"]["vehicles"][0]["limits"]
+        self.assertEqual(limits["maxDistance"], 100000)
+        self.assertEqual(limits["shiftTime"], 36000)
+        self.assertEqual(limits["tourSize"], 20)
+
+    def test_set_vehicle_limits_partial(self):
+        problem = self._base_vehicle_problem().set_vehicle_limits("v", max_distance=50000)
+        limits = problem.to_dict()["fleet"]["vehicles"][0]["limits"]
+        self.assertIn("maxDistance", limits)
+        self.assertNotIn("shiftTime", limits)
+
+    def test_set_vehicle_limits_empty_is_noop(self):
+        problem = self._base_vehicle_problem().set_vehicle_limits("v")
+        vehicle = problem.to_dict()["fleet"]["vehicles"][0]
+        self.assertNotIn("limits", vehicle)
+
+    def test_set_vehicle_skills(self):
+        problem = self._base_vehicle_problem().set_vehicle_skills("v", ["crane", "refrigerator"])
+        skills = problem.to_dict()["fleet"]["vehicles"][0]["skills"]
+        self.assertEqual(skills, ["crane", "refrigerator"])
+
+    def test_find_vehicle_raises_for_unknown_type_id(self):
+        with self.assertRaises(KeyError):
+            self._base_vehicle_problem().set_vehicle_skills("nonexistent", ["x"])
+
+    # ---- Typed relation helpers ----
+
+    def test_add_relation_sequence(self):
+        problem = (
+            Problem.empty()
+            .add_delivery("d1", (1.0, 2.0), [1])
+            .add_delivery("d2", (3.0, 4.0), [1])
+            .add_relation_sequence(["d1", "d2"], "vehicle_1")
+        )
+        relation = problem.to_dict()["plan"]["relations"][0]
+        self.assertEqual(relation["type"], "sequence")
+        self.assertEqual(relation["jobs"], ["d1", "d2"])
+        self.assertEqual(relation["vehicleId"], "vehicle_1")
+
+    def test_add_relation_strict_with_shift_index(self):
+        problem = (
+            Problem.empty()
+            .add_delivery("d1", (1.0, 2.0), [1])
+            .add_relation_strict(["d1"], "v1", shift_index=0)
+        )
+        relation = problem.to_dict()["plan"]["relations"][0]
+        self.assertEqual(relation["type"], "strict")
+        self.assertEqual(relation["shiftIndex"], 0)
+
+    def test_add_relation_strict_without_shift_index(self):
+        problem = (
+            Problem.empty()
+            .add_delivery("d1", (1.0, 2.0), [1])
+            .add_relation_strict(["d1"], "v1")
+        )
+        relation = problem.to_dict()["plan"]["relations"][0]
+        self.assertNotIn("shiftIndex", relation)
+
+    def test_add_relation_tour(self):
+        problem = (
+            Problem.empty()
+            .add_delivery("d1", (1.0, 2.0), [1])
+            .add_relation_tour(["d1"], "v1")
+        )
+        relation = problem.to_dict()["plan"]["relations"][0]
+        self.assertEqual(relation["type"], "tour")
+
+    # ---- Typed objective helpers ----
+
+    def test_set_objectives_typed_on_problem(self):
+        problem = Problem.empty().set_objectives_typed([
+            [Objective.minimize_unassigned()],
+            [Objective.minimize_cost()],
+        ])
+        objectives = problem.to_dict()["objectives"]
+        self.assertEqual(len(objectives), 2)
+        self.assertEqual(objectives[0][0]["type"], "minimize-unassigned")
+        self.assertEqual(objectives[1][0]["type"], "minimize-cost")
+
 
 class ConfigBuilderTest(unittest.TestCase):
     """Test Config builder methods."""
@@ -427,6 +644,230 @@ class LocationHandlingTest(unittest.TestCase):
         )
         job = problem.to_dict()["plan"]["jobs"][0]
         self.assertIn("times", job["deliveries"][0]["places"][0])
+
+
+class ObjectiveHelperTest(unittest.TestCase):
+    """Test Objective typed helpers."""
+
+    def test_minimize_cost(self):
+        obj = Objective.minimize_cost()
+        self.assertEqual(obj.to_dict(), {"type": "minimize-cost"})
+
+    def test_minimize_unassigned_with_breaks(self):
+        obj = Objective.minimize_unassigned(breaks=0.5)
+        d = obj.to_dict()
+        self.assertEqual(d["type"], "minimize-unassigned")
+        self.assertEqual(d["breaks"], 0.5)
+
+    def test_minimize_unassigned_without_breaks(self):
+        obj = Objective.minimize_unassigned()
+        self.assertEqual(obj.to_dict(), {"type": "minimize-unassigned"})
+
+    def test_balance_objectives_with_threshold(self):
+        for factory, expected_type in [
+            (Objective.balance_max_load, "balance-max-load"),
+            (Objective.balance_activities, "balance-activities"),
+            (Objective.balance_distance, "balance-distance"),
+            (Objective.balance_duration, "balance-duration"),
+        ]:
+            obj = factory(threshold=0.1)
+            d = obj.to_dict()
+            self.assertEqual(d["type"], expected_type)
+            self.assertEqual(d["options"]["threshold"], 0.1)
+
+    def test_all_static_objectives_have_correct_types(self):
+        pairs = [
+            (Objective.minimize_tours(), "minimize-tours"),
+            (Objective.maximize_tours(), "maximize-tours"),
+            (Objective.maximize_value(), "maximize-value"),
+            (Objective.minimize_distance(), "minimize-distance"),
+            (Objective.minimize_duration(), "minimize-duration"),
+            (Objective.minimize_arrival_time(), "minimize-arrival-time"),
+        ]
+        for obj, expected_type in pairs:
+            self.assertEqual(obj.to_dict()["type"], expected_type)
+
+    def test_objective_repr(self):
+        self.assertIn("minimize-cost", repr(Objective.minimize_cost()))
+
+
+class RoutingMatrixToolsTest(unittest.TestCase):
+    """Test RoutingMatrix.from_2d and MatrixCollection."""
+
+    def test_from_2d_flattens_correctly(self):
+        durations = [[0, 60, 90], [60, 0, 30], [90, 30, 0]]
+        distances = [[0, 1000, 1500], [1000, 0, 500], [1500, 500, 0]]
+        matrix = RoutingMatrix.from_2d(durations, distances, profile="car")
+        data = matrix.to_dict()
+        self.assertEqual(data["travelTimes"], [0, 60, 90, 60, 0, 30, 90, 30, 0])
+        self.assertEqual(data["distances"], [0, 1000, 1500, 1000, 0, 500, 1500, 500, 0])
+        self.assertEqual(data["profile"], "car")
+
+    def test_from_2d_with_timestamp(self):
+        matrix = RoutingMatrix.from_2d(
+            [[0, 1], [1, 0]], [[0, 2], [2, 0]], timestamp="2024-06-01T00:00:00Z"
+        )
+        self.assertEqual(matrix.to_dict()["timestamp"], "2024-06-01T00:00:00Z")
+
+    def test_from_2d_raises_for_non_square(self):
+        with self.assertRaises(ValueError):
+            RoutingMatrix.from_2d([[0, 1, 2], [1, 0]], [[0, 1], [1, 0]])
+
+    def test_from_2d_without_profile(self):
+        matrix = RoutingMatrix.from_2d([[0, 1], [1, 0]], [[0, 2], [2, 0]])
+        self.assertNotIn("profile", matrix.to_dict())
+
+    def test_matrix_collection_add_and_to_list(self):
+        col = MatrixCollection()
+        m1 = RoutingMatrix(profile="car", durations=[0, 1, 1, 0], distances=[0, 2, 2, 0])
+        m2 = RoutingMatrix(profile="bike", durations=[0, 2, 2, 0], distances=[0, 3, 3, 0])
+        col.add(m1).add(m2)
+        lst = col.to_list()
+        self.assertEqual(len(lst), 2)
+        self.assertEqual(len(col), 2)
+
+    def test_matrix_collection_is_iterable(self):
+        col = MatrixCollection()
+        col.add(RoutingMatrix(durations=[0], distances=[0]))
+        items = list(col)
+        self.assertEqual(len(items), 1)
+
+    def test_matrix_collection_empty(self):
+        col = MatrixCollection()
+        self.assertEqual(len(col), 0)
+        self.assertEqual(col.to_list(), [])
+
+
+class SolutionRichAccessorTest(unittest.TestCase):
+    """Test Solution rich accessors and TourView/StopView."""
+
+    def _make_solution(self) -> Solution:
+        return Solution.from_dict({
+            "statistic": {
+                "cost": 250.5,
+                "distance": 800,
+                "duration": 7200,
+                "times": {"driving": 3600, "serving": 1800, "waiting": 0, "commuting": 0, "parking": 0},
+            },
+            "tours": [
+                {
+                    "vehicleId": "vehicle_1_1",
+                    "typeId": "vehicle_1",
+                    "shiftIndex": 0,
+                    "stops": [
+                        {
+                            "location": {"lat": 52.0, "lng": 13.0},
+                            "time": {
+                                "arrival": "2020-01-01T09:00:00Z",
+                                "departure": "2020-01-01T09:05:00Z",
+                            },
+                            "distance": 0,
+                            "load": [0],
+                            "activities": [{"jobId": "departure", "type": "departure"}],
+                        },
+                        {
+                            "location": {"lat": 52.1, "lng": 13.1},
+                            "time": {
+                                "arrival": "2020-01-01T09:30:00Z",
+                                "departure": "2020-01-01T09:35:00Z",
+                            },
+                            "distance": 500,
+                            "load": [1],
+                            "activities": [{"jobId": "d1", "type": "delivery"}],
+                        },
+                    ],
+                    "statistic": {"cost": 250.5, "distance": 800, "duration": 7200, "times": {}},
+                }
+            ],
+            "unassigned": [
+                {"jobId": "u1", "reasons": [{"code": 101, "description": "no suitable vehicle"}]}
+            ],
+        })
+
+    def test_total_cost(self):
+        self.assertAlmostEqual(self._make_solution().total_cost, 250.5)
+
+    def test_total_distance(self):
+        self.assertEqual(self._make_solution().total_distance, 800)
+
+    def test_total_duration(self):
+        self.assertEqual(self._make_solution().total_duration, 7200)
+
+    def test_unassigned(self):
+        unassigned = self._make_solution().unassigned
+        self.assertEqual(len(unassigned), 1)
+        self.assertEqual(unassigned[0]["jobId"], "u1")
+
+    def test_unassigned_empty_when_missing(self):
+        solution = Solution.from_dict({"statistic": {}, "tours": []})
+        self.assertEqual(solution.unassigned, [])
+
+    def test_iter_tours_yields_tour_views(self):
+        solution = self._make_solution()
+        tour_views = list(solution.iter_tours())
+        self.assertEqual(len(tour_views), 1)
+        self.assertIsInstance(tour_views[0], TourView)
+
+    def test_tour_view_properties(self):
+        tour = list(self._make_solution().iter_tours())[0]
+        self.assertEqual(tour.vehicle_id, "vehicle_1_1")
+        self.assertEqual(tour.type_id, "vehicle_1")
+        self.assertEqual(tour.shift_index, 0)
+        self.assertEqual(len(tour.stops), 2)
+        self.assertAlmostEqual(tour.cost, 250.5)
+        self.assertEqual(tour.distance, 800)
+        self.assertEqual(tour.duration, 7200)
+
+    def test_stop_view_properties(self):
+        tour = list(self._make_solution().iter_tours())[0]
+        stops = list(tour.iter_stops())
+        self.assertEqual(len(stops), 2)
+        self.assertIsInstance(stops[0], StopView)
+        self.assertAlmostEqual(stops[0].lat, 52.0)
+        self.assertAlmostEqual(stops[0].lng, 13.0)
+        self.assertEqual(stops[0].arrival, "2020-01-01T09:00:00Z")
+        self.assertEqual(stops[0].departure, "2020-01-01T09:05:00Z")
+        self.assertEqual(stops[0].distance, 0)
+        self.assertEqual(stops[0].load, [0])
+
+    def test_stop_view_job_ids(self):
+        tour = list(self._make_solution().iter_tours())[0]
+        stops = list(tour.iter_stops())
+        self.assertEqual(stops[1].job_ids(), ["d1"])
+
+    def test_solution_summary_contains_key_info(self):
+        summary = self._make_solution().summary()
+        self.assertIn("Tours", summary)
+        self.assertIn("Unassigned", summary)
+        self.assertIn("Cost", summary)
+        self.assertIn("Distance", summary)
+        self.assertIn("Driving", summary)
+
+    def test_solution_repr(self):
+        r = repr(self._make_solution())
+        self.assertIn("Solution(tours=1", r)
+        self.assertIn("unassigned=1", r)
+        self.assertIn("cost=250.50", r)
+
+    def test_tour_view_repr(self):
+        tour = list(self._make_solution().iter_tours())[0]
+        self.assertIn("vehicle_1_1", repr(tour))
+
+    def test_stop_view_repr(self):
+        tour = list(self._make_solution().iter_tours())[0]
+        stop = list(tour.iter_stops())[0]
+        self.assertIn("52.0", repr(stop))
+
+    def test_tour_view_to_dict(self):
+        tour = list(self._make_solution().iter_tours())[0]
+        d = tour.to_dict()
+        self.assertEqual(d["vehicleId"], "vehicle_1_1")
+
+    def test_stop_view_to_dict(self):
+        tour = list(self._make_solution().iter_tours())[0]
+        stop = list(tour.iter_stops())[0]
+        d = stop.to_dict()
+        self.assertIn("location", d)
 
 
 if __name__ == "__main__":

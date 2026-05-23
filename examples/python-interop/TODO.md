@@ -34,23 +34,23 @@ Python facade has a documented API and at least one test or example covering it.
 - [x] Profile helper
 - [x] Raw relation helper
 - [x] Raw objectives setter
-- [ ] Service job helper
+- [x] Service job helper
 - [ ] Multi-place task helper
-- [ ] Job skills helper
-- [ ] Job priority helper
-- [ ] Job value helper
+- [x] Job skills helper
+- [x] Job priority helper
+- [x] Job value helper
 - [ ] Job group/compatibility helpers
 - [ ] Job order/sequence constraints helper
-- [ ] Relation typed helpers for all pragmatic relation types
-- [ ] Objective typed helpers for all pragmatic objective types
+- [x] Relation typed helpers for all pragmatic relation types
+- [x] Objective typed helpers for all pragmatic objective types
 - [ ] Vehicle multi-shift helper
-- [ ] Vehicle break helper
-- [ ] Vehicle reload helper
+- [x] Vehicle break helper
+- [x] Vehicle reload helper
 - [ ] Vehicle recharge helper
 - [ ] Vehicle resource helper
 - [ ] Vehicle dispatch/open route helper
-- [ ] Vehicle limits helper
-- [ ] Vehicle skills helper
+- [x] Vehicle limits helper
+- [x] Vehicle skills helper
 - [ ] Fleet profile speed/scale helper
 - [ ] Location index helper
 - [ ] Multi-dimensional capacity/demand validation
@@ -61,12 +61,12 @@ Python facade has a documented API and at least one test or example covering it.
 - [x] Single matrix asset
 - [x] Multiple matrices passed to `solve`
 - [x] Optional `timestamp` field for time-dependent matrices
-- [ ] Matrix collection helper
+- [x] Matrix collection helper
 - [ ] Matrix profile consistency validation against `fleet.profiles`
 - [ ] Matrix dimension validation against routing locations
 - [ ] Time-dependent matrix helper for multiple timestamps per profile
 - [ ] Location list to external routing service workflow helper
-- [ ] Matrix construction from 2D duration/distance arrays
+- [x] Matrix construction from 2D duration/distance arrays
 
 ## Config
 
@@ -100,13 +100,13 @@ Python facade has a documented API and at least one test or example covering it.
 - [x] Read/write solution JSON asset
 - [x] Pass initial solution JSON to native binding
 - [ ] Strong typed solution model
-- [ ] Route/tour accessor helpers
-- [ ] Stop/activity accessor helpers
-- [ ] Unassigned jobs accessor helpers
+- [x] Route/tour accessor helpers
+- [x] Stop/activity accessor helpers
+- [x] Unassigned jobs accessor helpers
 - [ ] Initial solution route builder
 - [ ] Initial solution unassigned helper
 - [ ] Solution to geojson helper
-- [ ] Solution summary/statistics helper
+- [x] Solution summary/statistics helper
 
 ## Examples
 
@@ -116,13 +116,13 @@ Python facade has a documented API and at least one test or example covering it.
 - [x] Initial solution example
 - [x] Hyper config example
 - [x] README usage guide
-- [ ] Objectives example
-- [ ] Relations example
+- [x] Objectives example
+- [x] Relations example
 - [ ] Break/reload/recharge example
 - [ ] Time-dependent matrix example
 - [ ] Location index example
 - [ ] Multi-profile matrix example
-- [ ] Solution inspection example
+- [x] Solution inspection example
 
 ## Tests
 
@@ -132,10 +132,10 @@ Python facade has a documented API and at least one test or example covering it.
 - [x] Initial solution binding dispatch test
 - [x] Evolution helper serialization test
 - [x] Hyper helper serialization test
-- [ ] Objective helper tests
-- [ ] Relation helper tests
-- [ ] Vehicle advanced helper tests
-- [ ] Routing matrix validation tests
+- [x] Objective helper tests
+- [x] Relation helper tests
+- [x] Vehicle advanced helper tests
+- [x] Routing matrix validation tests
 - [ ] Initial solution builder tests
 - [ ] Native `vrp_cli` integration tests
 

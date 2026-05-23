@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Union
+from typing import Any, Callable, Dict, Generator, Iterable, Iterator, List, Optional, Sequence, Union
 
 try:
     from pydantic.json import pydantic_encoder
@@ -160,6 +160,129 @@ class Problem(JsonAsset):
         self.add_profile(profile)
         return self
 
+    def add_service(
+        self,
+        job_id: str,
+        location: Any,
+        *,
+        duration: Union[int, float] = 0,
+        times: Optional[Sequence[Sequence[str]]] = None,
+        tag: Optional[str] = None,
+        **extra: Any,
+    ) -> "Problem":
+        """Add a service job (no demand, just a visit with optional duration/time-window)."""
+        place: Dict[str, Any] = {"location": _location(location), "duration": duration}
+        if times is not None:
+            place["times"] = [list(w) for w in times]
+        if tag is not None:
+            place["tag"] = tag
+        job: Dict[str, Any] = {"id": job_id, "services": [{"places": [place]}]}
+        job.update(extra)
+        self._jobs().append(job)
+        return self
+
+    def set_job_skills(
+        self,
+        job_id: str,
+        *,
+        all_of: Optional[Sequence[str]] = None,
+        one_of: Optional[Sequence[str]] = None,
+        none_of: Optional[Sequence[str]] = None,
+    ) -> "Problem":
+        """Attach skill requirements to an already-added job."""
+        skills: Dict[str, Any] = {}
+        if all_of is not None:
+            skills["allOf"] = list(all_of)
+        if one_of is not None:
+            skills["oneOf"] = list(one_of)
+        if none_of is not None:
+            skills["noneOf"] = list(none_of)
+        self._find_job(job_id)["skills"] = skills
+        return self
+
+    def set_job_priority(self, job_id: str, priority: int) -> "Problem":
+        """Set the dispatch priority of an already-added job (1 = highest)."""
+        self._find_job(job_id)["priority"] = priority
+        return self
+
+    def set_job_value(self, job_id: str, value: float) -> "Problem":
+        """Set the value of an already-added job (used with maximize-value objective)."""
+        self._find_job(job_id)["value"] = value
+        return self
+
+    def add_vehicle_break(
+        self,
+        vehicle_type_id: str,
+        *,
+        times: Sequence[Sequence[str]],
+        duration: Union[int, float],
+        locations: Optional[Sequence[Any]] = None,
+        shift_index: int = 0,
+    ) -> "Problem":
+        """Add a time-window break to a vehicle type's shift.
+
+        ``times`` is a list of ``[earliest, latest]`` time-window pairs.
+        ``locations`` is an optional list of allowed break locations; if omitted
+        the break can happen anywhere on the route.
+        """
+        vehicle = self._find_vehicle(vehicle_type_id)
+        shift = vehicle["shifts"][shift_index]
+        brk: Dict[str, Any] = {
+            "time": {"times": [list(w) for w in times]},
+            "duration": duration,
+        }
+        if locations is not None:
+            brk["places"] = [{"location": _location(loc), "duration": duration} for loc in locations]
+        shift.setdefault("breaks", []).append(brk)
+        return self
+
+    def add_vehicle_reload(
+        self,
+        vehicle_type_id: str,
+        location: Any,
+        *,
+        duration: Union[int, float] = 0,
+        times: Optional[Sequence[Sequence[str]]] = None,
+        tag: Optional[str] = None,
+        shift_index: int = 0,
+    ) -> "Problem":
+        """Add a reload stop to a vehicle type's shift (allows refilling capacity mid-route)."""
+        vehicle = self._find_vehicle(vehicle_type_id)
+        shift = vehicle["shifts"][shift_index]
+        reload: Dict[str, Any] = {"location": _location(location), "duration": duration}
+        if times is not None:
+            reload["times"] = [list(w) for w in times]
+        if tag is not None:
+            reload["tag"] = tag
+        shift.setdefault("reloads", []).append(reload)
+        return self
+
+    def set_vehicle_limits(
+        self,
+        vehicle_type_id: str,
+        *,
+        max_distance: Optional[Union[int, float]] = None,
+        max_duration: Optional[Union[int, float]] = None,
+        tour_size: Optional[int] = None,
+    ) -> "Problem":
+        """Set travel / tour-size limits for a vehicle type."""
+        vehicle = self._find_vehicle(vehicle_type_id)
+        limits: Dict[str, Any] = {}
+        if max_distance is not None:
+            limits["maxDistance"] = max_distance
+        if max_duration is not None:
+            limits["shiftTime"] = max_duration
+        if tour_size is not None:
+            limits["tourSize"] = tour_size
+        if limits:
+            vehicle["limits"] = limits
+        return self
+
+    def set_vehicle_skills(self, vehicle_type_id: str, skills: Sequence[str]) -> "Problem":
+        """Assign a list of skills to a vehicle type."""
+        self._find_vehicle(vehicle_type_id)["skills"] = list(skills)
+        return self
+
     def add_profile(self, name: str, **extra: Any) -> "Problem":
         profiles = self._profiles()
         if not any(profile.get("name") == name for profile in profiles):
@@ -168,14 +291,49 @@ class Problem(JsonAsset):
             profiles.append(profile)
         return self
 
+    # ------------------------------------------------------------------
+    # Typed relation helpers
+    # ------------------------------------------------------------------
+
     def add_relation(self, relation_type: str, jobs: Sequence[str], vehicle_id: str, **extra: Any) -> "Problem":
+        """Add a raw relation (use typed helpers below when possible)."""
         relation = {"type": relation_type, "jobs": list(jobs), "vehicleId": vehicle_id}
         relation.update(extra)
         self._data.setdefault("plan", {}).setdefault("relations", []).append(relation)
         return self
 
+    def add_relation_sequence(self, jobs: Sequence[str], vehicle_id: str) -> "Problem":
+        """Enforce that *jobs* are served in the given order (but not necessarily consecutively)."""
+        return self.add_relation("sequence", jobs, vehicle_id)
+
+    def add_relation_strict(
+        self, jobs: Sequence[str], vehicle_id: str, shift_index: Optional[int] = None
+    ) -> "Problem":
+        """Enforce that *jobs* are served in strict consecutive order on *vehicle_id*."""
+        extra: Dict[str, Any] = {}
+        if shift_index is not None:
+            extra["shiftIndex"] = shift_index
+        return self.add_relation("strict", jobs, vehicle_id, **extra)
+
+    def add_relation_tour(self, jobs: Sequence[str], vehicle_id: str) -> "Problem":
+        """Assign *jobs* exclusively to *vehicle_id* (any order)."""
+        return self.add_relation("tour", jobs, vehicle_id)
+
+    # ------------------------------------------------------------------
+    # Typed objective helpers
+    # ------------------------------------------------------------------
+
     def set_objectives(self, objectives: Sequence[Sequence[Dict[str, Any]]]) -> "Problem":
+        """Set raw objectives (list-of-lists of dicts). Use Objective helpers for typed access."""
         self._data["objectives"] = deepcopy(objectives)
+        return self
+
+    def set_objectives_typed(self, objectives: Sequence[Sequence["Objective"]]) -> "Problem":
+        """Set objectives using :class:`Objective` typed helpers.
+
+        Each inner list is one priority level; earlier lists take priority.
+        """
+        self._data["objectives"] = [[obj.to_dict() for obj in group] for group in objectives]
         return self
 
     def _add_job_task(
@@ -203,6 +361,100 @@ class Problem(JsonAsset):
 
     def _profiles(self) -> List[Dict[str, Any]]:
         return self._data.setdefault("fleet", {}).setdefault("profiles", [])
+
+    def _find_job(self, job_id: str) -> Dict[str, Any]:
+        for job in self._jobs():
+            if job.get("id") == job_id:
+                return job
+        raise KeyError(f"Job '{job_id}' not found in problem.")
+
+    def _find_vehicle(self, type_id: str) -> Dict[str, Any]:
+        for vehicle in self._vehicles():
+            if vehicle.get("typeId") == type_id:
+                return vehicle
+        raise KeyError(f"Vehicle type '{type_id}' not found in problem.")
+
+
+class Objective:
+    """Typed helper for a single pragmatic objective entry."""
+
+    def __init__(self, type: str, **options: Any) -> None:
+        self._type = type
+        self._options = options
+
+    def to_dict(self) -> Dict[str, Any]:
+        d: Dict[str, Any] = {"type": self._type}
+        if self._options:
+            d.update(self._options)
+        return d
+
+    # -- Named constructors -------------------------------------------
+
+    @staticmethod
+    def minimize_cost() -> "Objective":
+        return Objective("minimize-cost")
+
+    @staticmethod
+    def minimize_unassigned(breaks: Optional[float] = None) -> "Objective":
+        opts: Dict[str, Any] = {}
+        if breaks is not None:
+            opts["breaks"] = breaks
+        return Objective("minimize-unassigned", **opts)
+
+    @staticmethod
+    def minimize_tours() -> "Objective":
+        return Objective("minimize-tours")
+
+    @staticmethod
+    def maximize_tours() -> "Objective":
+        return Objective("maximize-tours")
+
+    @staticmethod
+    def maximize_value() -> "Objective":
+        return Objective("maximize-value")
+
+    @staticmethod
+    def minimize_distance() -> "Objective":
+        return Objective("minimize-distance")
+
+    @staticmethod
+    def minimize_duration() -> "Objective":
+        return Objective("minimize-duration")
+
+    @staticmethod
+    def minimize_arrival_time() -> "Objective":
+        return Objective("minimize-arrival-time")
+
+    @staticmethod
+    def balance_max_load(threshold: Optional[float] = None) -> "Objective":
+        opts: Dict[str, Any] = {}
+        if threshold is not None:
+            opts["options"] = {"threshold": threshold}
+        return Objective("balance-max-load", **opts)
+
+    @staticmethod
+    def balance_activities(threshold: Optional[float] = None) -> "Objective":
+        opts: Dict[str, Any] = {}
+        if threshold is not None:
+            opts["options"] = {"threshold": threshold}
+        return Objective("balance-activities", **opts)
+
+    @staticmethod
+    def balance_distance(threshold: Optional[float] = None) -> "Objective":
+        opts: Dict[str, Any] = {}
+        if threshold is not None:
+            opts["options"] = {"threshold": threshold}
+        return Objective("balance-distance", **opts)
+
+    @staticmethod
+    def balance_duration(threshold: Optional[float] = None) -> "Objective":
+        opts: Dict[str, Any] = {}
+        if threshold is not None:
+            opts["options"] = {"threshold": threshold}
+        return Objective("balance-duration", **opts)
+
+    def __repr__(self) -> str:
+        return f"Objective({self._type!r})"
 
 
 class RoutingLocations(JsonAsset):
@@ -249,6 +501,71 @@ class RoutingMatrix(JsonAsset):
     @classmethod
     def from_dict(cls, data: JsonData) -> "RoutingMatrix":
         return cls(data)
+
+    @classmethod
+    def from_2d(
+        cls,
+        durations: Sequence[Sequence[Union[int, float]]],
+        distances: Sequence[Sequence[Union[int, float]]],
+        *,
+        profile: Optional[str] = None,
+        timestamp: Optional[str] = None,
+    ) -> "RoutingMatrix":
+        """Build a :class:`RoutingMatrix` from 2-D duration and distance arrays.
+
+        Both arrays must be square matrices of the same dimension *n × n*,
+        where *n* is the number of routing locations.  The values are flattened
+        in row-major order, matching the pragmatic format expectation.
+
+        Example::
+
+            matrix = RoutingMatrix.from_2d(
+                durations=[[0, 60, 90], [60, 0, 30], [90, 30, 0]],
+                distances=[[0, 1000, 1500], [1000, 0, 500], [1500, 500, 0]],
+                profile="car",
+            )
+        """
+        flat_d = [v for row in durations for v in row]
+        flat_m = [v for row in distances for v in row]
+        n = len(durations)
+        if len(flat_d) != n * n or len(flat_m) != n * n:
+            raise ValueError(
+                f"from_2d: durations and distances must both be {n}×{n} square matrices"
+            )
+        return cls(durations=flat_d, distances=flat_m, profile=profile, timestamp=timestamp)
+
+
+class MatrixCollection:
+    """A helper that groups :class:`RoutingMatrix` objects by profile.
+
+    Use :meth:`add` to register matrices (one per profile / timestamp),
+    then pass :meth:`to_list` to :func:`solve` as the ``matrices`` argument.
+
+    Example::
+
+        col = MatrixCollection()
+        col.add(RoutingMatrix(profile="car", durations=[...], distances=[...]))
+        col.add(RoutingMatrix(profile="bike", durations=[...], distances=[...]))
+        solution = solve(problem, matrices=col.to_list(), config=config)
+    """
+
+    def __init__(self) -> None:
+        self._matrices: List[RoutingMatrix] = []
+
+    def add(self, matrix: RoutingMatrix) -> "MatrixCollection":
+        """Register a matrix and return *self* for chaining."""
+        self._matrices.append(matrix)
+        return self
+
+    def to_list(self) -> List[RoutingMatrix]:
+        """Return a plain list suitable for the ``matrices`` argument of :func:`solve`."""
+        return list(self._matrices)
+
+    def __len__(self) -> int:
+        return len(self._matrices)
+
+    def __iter__(self) -> Iterator[RoutingMatrix]:
+        return iter(self._matrices)
 
 
 class Config(JsonAsset):
@@ -700,6 +1017,173 @@ class Solution(JsonAsset):
     def tours(self) -> List[Dict[str, Any]]:
         data = self.to_dict()
         return data.get("tours", []) if isinstance(data, dict) else []
+
+    @property
+    def unassigned(self) -> List[Dict[str, Any]]:
+        """Return the list of unassigned jobs (empty list if all jobs were assigned)."""
+        data = self.to_dict()
+        return data.get("unassigned", []) if isinstance(data, dict) else []
+
+    @property
+    def total_cost(self) -> float:
+        """Total solution cost as reported in the top-level statistic."""
+        return float(self.statistic.get("cost", 0.0))
+
+    @property
+    def total_distance(self) -> int:
+        """Total travel distance (in matrix units) across all tours."""
+        return int(self.statistic.get("distance", 0))
+
+    @property
+    def total_duration(self) -> int:
+        """Total elapsed duration (in seconds) across all tours."""
+        return int(self.statistic.get("duration", 0))
+
+    def iter_tours(self) -> "Generator[TourView, None, None]":
+        """Iterate over all tours as :class:`TourView` objects."""
+        for tour_dict in self.tours:
+            yield TourView(tour_dict)
+
+    def summary(self) -> str:
+        """Return a human-readable summary of the solution."""
+        stat = self.statistic
+        tours = self.tours
+        unassigned = self.unassigned
+        times = stat.get("times", {})
+        lines = [
+            f"Solution summary:",
+            f"  Tours        : {len(tours)}",
+            f"  Unassigned   : {len(unassigned)}",
+            f"  Cost         : {stat.get('cost', 0):.2f}",
+            f"  Distance     : {stat.get('distance', 0)}",
+            f"  Duration     : {stat.get('duration', 0)}s",
+        ]
+        if times:
+            lines += [
+                f"    Driving    : {times.get('driving', 0)}s",
+                f"    Serving    : {times.get('serving', 0)}s",
+                f"    Waiting    : {times.get('waiting', 0)}s",
+            ]
+        return "\n".join(lines)
+
+    def __repr__(self) -> str:
+        return (
+            f"Solution(tours={len(self.tours)}, unassigned={len(self.unassigned)}, "
+            f"cost={self.total_cost:.2f})"
+        )
+
+
+class TourView:
+    """A read-only view of a single tour in a :class:`Solution`.
+
+    Wraps the raw tour dict returned by the solver and exposes
+    structured accessors without copying the underlying data.
+    """
+
+    __slots__ = ("_data",)
+
+    def __init__(self, data: Dict[str, Any]) -> None:
+        self._data = data
+
+    @property
+    def vehicle_id(self) -> str:
+        """The full vehicle ID (e.g. ``'vehicle_1_1'``)."""
+        return self._data.get("vehicleId", "")
+
+    @property
+    def type_id(self) -> str:
+        """The vehicle type ID."""
+        return self._data.get("typeId", "")
+
+    @property
+    def shift_index(self) -> int:
+        return int(self._data.get("shiftIndex", 0))
+
+    @property
+    def stops(self) -> List[Dict[str, Any]]:
+        """Raw stop list for this tour."""
+        return self._data.get("stops", [])
+
+    @property
+    def statistic(self) -> Dict[str, Any]:
+        """Per-tour statistic dict."""
+        return self._data.get("statistic", {})
+
+    @property
+    def cost(self) -> float:
+        return float(self.statistic.get("cost", 0.0))
+
+    @property
+    def distance(self) -> int:
+        return int(self.statistic.get("distance", 0))
+
+    @property
+    def duration(self) -> int:
+        return int(self.statistic.get("duration", 0))
+
+    def iter_stops(self) -> "Generator[StopView, None, None]":
+        """Iterate over the stops of this tour as :class:`StopView` objects."""
+        for stop_dict in self.stops:
+            yield StopView(stop_dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return deepcopy(self._data)
+
+    def __repr__(self) -> str:
+        return f"TourView(vehicle_id={self.vehicle_id!r}, stops={len(self.stops)})"
+
+
+class StopView:
+    """A read-only view of a single stop inside a :class:`TourView`."""
+
+    __slots__ = ("_data",)
+
+    def __init__(self, data: Dict[str, Any]) -> None:
+        self._data = data
+
+    @property
+    def location(self) -> Dict[str, float]:
+        """``{"lat": ..., "lng": ...}`` dict for this stop."""
+        return self._data.get("location", {})
+
+    @property
+    def lat(self) -> float:
+        return float(self.location.get("lat", 0.0))
+
+    @property
+    def lng(self) -> float:
+        return float(self.location.get("lng", 0.0))
+
+    @property
+    def arrival(self) -> str:
+        return self._data.get("time", {}).get("arrival", "")
+
+    @property
+    def departure(self) -> str:
+        return self._data.get("time", {}).get("departure", "")
+
+    @property
+    def distance(self) -> int:
+        return int(self._data.get("distance", 0))
+
+    @property
+    def load(self) -> List[int]:
+        return list(self._data.get("load", []))
+
+    @property
+    def activities(self) -> List[Dict[str, Any]]:
+        """Raw activities list for this stop."""
+        return self._data.get("activities", [])
+
+    def job_ids(self) -> List[str]:
+        """Return the job IDs of all activities at this stop."""
+        return [act.get("jobId", "") for act in self.activities]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return deepcopy(self._data)
+
+    def __repr__(self) -> str:
+        return f"StopView(lat={self.lat}, lng={self.lng}, activities={len(self.activities)})"
 
 
 def solve(
