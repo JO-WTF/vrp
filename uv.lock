@@ -1,0 +1,25 @@
+version = 1
+revision = 3
+requires-python = ">=3.10"
+
+[manifest]
+members = [
+    "vrp",
+    "vrp-cli",
+]
+
+[[package]]
+name = "vrp"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "vrp-cli" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "vrp-cli", editable = "vrp-cli" }]
+
+[[package]]
+name = "vrp-cli"
+version = "0.1.0"
+source = { editable = "vrp-cli" }

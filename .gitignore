@@ -18,6 +18,8 @@ target
 *.pyc
 __pycache__
 .venv
+*.pyd
+*.so
 
 # ignore files from heuristic playground
 *.png
@@ -27,3 +29,7 @@ heuristic_state.json
 callgrind*
 
 .claude
+
+# VRP visualization
+.vrp_vis_data/
+vrp-cli/python/vrp_cli/vis/frontend/node_modules/

@@ -1,3 +1,13 @@
+[project]
+name = "vrp_cli"
+version = "0.1.0"
+description = "VRP Python Bindings"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+vrp-vis = "vrp_cli.vis.__main__:main"
+
 [build-system]
 requires = ["maturin>=0.14,<0.15"]
 build-backend = "maturin"
