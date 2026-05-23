@@ -843,6 +843,23 @@ class SolutionRichAccessorTest(unittest.TestCase):
         self.assertIn("Distance", summary)
         self.assertIn("Driving", summary)
 
+    def test_solution_geojson(self):
+        solution = Solution.from_dict({
+            "statistic": {},
+            "tours": [],
+            "extras": {
+                "features": {
+                    "type": "FeatureCollection",
+                    "features": []
+                }
+            }
+        })
+        self.assertIsNotNone(solution.geojson)
+        self.assertEqual(solution.geojson["type"], "FeatureCollection")
+
+        solution_empty = Solution.from_dict({"statistic": {}, "tours": []})
+        self.assertIsNone(solution_empty.geojson)
+
     def test_solution_repr(self):
         r = repr(self._make_solution())
         self.assertIn("Solution(tours=1", r)

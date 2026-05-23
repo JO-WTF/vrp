@@ -1025,6 +1025,15 @@ class Solution(JsonAsset):
         return data.get("unassigned", []) if isinstance(data, dict) else []
 
     @property
+    def geojson(self) -> Optional[Dict[str, Any]]:
+        """GeoJSON FeatureCollection if ``output.includeGeojson`` was requested, else ``None``."""
+        data = self.to_dict()
+        if not isinstance(data, dict):
+            return None
+        extras = data.get("extras", {})
+        return extras.get("features") if isinstance(extras, dict) else None
+
+    @property
     def total_cost(self) -> float:
         """Total solution cost as reported in the top-level statistic."""
         return float(self.statistic.get("cost", 0.0))
