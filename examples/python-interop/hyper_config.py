@@ -1,4 +1,4 @@
-from vrp import Config, Hyper, LocalOperator, Probability, Recreate, Ruin, min_max, noise
+from vrp_cli import Config, Hyper, LocalOperator, Probability, Recreate, Ruin, min_max, noise
 
 
 config = Config.defaults(max_time=60, max_generations=5000).set_hyper_static(

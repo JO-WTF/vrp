@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from vrp import Solution, TourView, StopView
+from vrp_cli import Solution, TourView, StopView
 
 # ---------------------------------------------------------------------------
 # Build a synthetic solution (normally returned by solve())
@@ -117,7 +117,7 @@ for item in unassigned:
 # RoutingMatrix.from_2d example
 # ---------------------------------------------------------------------------
 print()
-from vrp import RoutingMatrix, MatrixCollection
+from vrp_cli import RoutingMatrix, MatrixCollection
 
 matrix = RoutingMatrix.from_2d(
     durations=[[0, 1800, 3600], [1800, 0, 1800], [3600, 1800, 0]],

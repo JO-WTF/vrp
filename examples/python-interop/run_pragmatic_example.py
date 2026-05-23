@@ -8,7 +8,7 @@ PYTHON_INTEROP = ROOT / "examples" / "python-interop"
 DATA_DIR = ROOT / "examples" / "data" / "pragmatic"
 
 sys.path.insert(0, str(PYTHON_INTEROP))
-from vrp import Config, Problem, RoutingMatrix, solve  # noqa: E402
+from vrp_cli import Config, Problem, RoutingMatrix, solve  # noqa: E402
 
 
 def find_example_paths(problem_path: Path, matrix_path: Path | None) -> tuple[Path, Path | None]:

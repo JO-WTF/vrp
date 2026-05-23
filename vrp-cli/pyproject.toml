@@ -6,3 +6,5 @@ build-backend = "maturin"
 bindings = "pyo3"
 features = ["py_bindings"]
 strip = true
+python-source = "python"
+module-name = "vrp_cli._vrp_cli"

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from vrp import Config, Problem, RoutingMatrix, solve
+from vrp_cli import Config, Problem, RoutingMatrix, solve
 
 
 ROOT = Path(__file__).resolve().parents[2]

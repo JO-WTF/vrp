@@ -1,4 +1,4 @@
-from vrp import Config, Problem, Recreate, RoutingMatrix, solve
+from vrp_cli import Config, Problem, Recreate, RoutingMatrix, solve
 
 
 problem = (
@@ -30,8 +30,8 @@ problem = (
 
 matrix = RoutingMatrix(
     profile="normal_car",
-    durations=[0, 609, 981, 906, 813, 0, 371, 590, 1055, 514, 0, 439, 948, 511, 463, 0],
-    distances=[0, 3840, 5994, 5333, 4696, 0, 2154, 3226, 5763, 2674, 0, 2145, 5112, 2470, 2152, 0],
+    durations=[0, 609, 981, 813, 0, 371, 1055, 514, 0],
+    distances=[0, 3840, 5994, 4696, 0, 2154, 5763, 2674, 0],
 )
 
 config = (

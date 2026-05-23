@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from vrp import Problem
+from vrp_cli import Problem
 
 
 def _base_problem() -> Problem:

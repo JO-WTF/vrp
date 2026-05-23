@@ -1,5 +1,5 @@
 import pragmatic_types as prg
-from vrp import Config, Problem, RoutingMatrix, solve
+from vrp_cli import Config, Problem, RoutingMatrix, solve
 
 # if you want to use approximation, you can skip this definition and pass empty list later
 # also there is a get_locations method to get list of locations in expected order.
