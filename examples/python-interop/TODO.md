@@ -35,26 +35,26 @@ Python facade has a documented API and at least one test or example covering it.
 - [x] Raw relation helper
 - [x] Raw objectives setter
 - [x] Service job helper
-- [ ] Multi-place task helper
+- [x] Multi-place task helper
 - [x] Job skills helper
 - [x] Job priority helper
 - [x] Job value helper
-- [ ] Job group/compatibility helpers
-- [ ] Job order/sequence constraints helper
+- [x] Job group/compatibility helpers
+- [x] Job order/sequence constraints helper
 - [x] Relation typed helpers for all pragmatic relation types
 - [x] Objective typed helpers for all pragmatic objective types
-- [ ] Vehicle multi-shift helper
+- [x] Vehicle multi-shift helper
 - [x] Vehicle break helper
 - [x] Vehicle reload helper
-- [ ] Vehicle recharge helper
-- [ ] Vehicle resource helper
-- [ ] Vehicle dispatch/open route helper
+- [x] Vehicle recharge helper
+- [x] Vehicle resource helper
+- [x] Vehicle dispatch/open route helper
 - [x] Vehicle limits helper
 - [x] Vehicle skills helper
-- [ ] Fleet profile speed/scale helper
-- [ ] Location index helper
-- [ ] Multi-dimensional capacity/demand validation
-- [ ] Problem-level validation helpers before calling native binding
+- [x] Fleet profile speed/scale helper
+- [x] Location index helper
+- [x] Multi-dimensional capacity/demand validation
+- [x] Problem-level validation helpers before calling native binding
 
 ## Routing Matrix
 

@@ -220,7 +220,99 @@ class JsonAssetTest(unittest.TestCase):
 
 
 class ProblemBuilderTest(unittest.TestCase):
-    """Test Problem builder methods."""
+    """Test problem construction and typed helpers."""
+
+    def test_set_job_group(self):
+        problem = Problem.empty().add_delivery("j1", (1, 1), [1]).set_job_group("j1", "group1")
+        job = problem.to_dict()["plan"]["jobs"][0]
+        self.assertEqual(job.get("group"), "group1")
+
+    def test_set_job_compatibility(self):
+        problem = Problem.empty().add_delivery("j1", (1, 1), [1]).set_job_compatibility("j1", "comp1")
+        job = problem.to_dict()["plan"]["jobs"][0]
+        self.assertEqual(job.get("compatibility"), "comp1")
+
+    def test_job_order(self):
+        problem = Problem.empty().add_delivery("j1", (1, 1), [1], order=5)
+        job = problem.to_dict()["plan"]["jobs"][0]
+        self.assertEqual(job["deliveries"][0].get("order"), 5)
+
+        problem.add_pickup_delivery("j2", (1, 1), (2, 2), [1], pickup_order=1, delivery_order=2)
+        job2 = problem.to_dict()["plan"]["jobs"][1]
+        self.assertEqual(job2["pickups"][0].get("order"), 1)
+        self.assertEqual(job2["deliveries"][0].get("order"), 2)
+
+    def test_add_multi_place_task(self):
+        places = [{"location": {"lat": 1.0, "lng": 1.0}, "duration": 10}, {"location": {"lat": 2.0, "lng": 2.0}, "duration": 20}]
+        problem = Problem.empty().add_multi_place_task("j1", "services", places, [1], order=3)
+        job = problem.to_dict()["plan"]["jobs"][0]
+        self.assertEqual(len(job["services"][0]["places"]), 2)
+        self.assertEqual(job["services"][0]["order"], 3)
+
+    def test_add_vehicle_recharge(self):
+        problem = self._base_vehicle_problem().add_vehicle_recharge(
+            "v", 1000.0, [{"location": {"lat": 0.0, "lng": 0.0}, "duration": 100}]
+        )
+        vehicle = problem.to_dict()["fleet"]["vehicles"][0]
+        self.assertEqual(vehicle["shifts"][0]["recharges"]["maxDistance"], 1000.0)
+
+    def test_add_vehicle_reload_resource(self):
+        problem = Problem.empty().add_vehicle_reload_resource("res1", [100])
+        resources = problem.to_dict()["fleet"]["resources"]
+        self.assertEqual(resources[0]["id"], "res1")
+        self.assertEqual(resources[0]["capacity"], [100])
+    def test_add_vehicle_shift(self):
+        problem = self._base_vehicle_problem().add_vehicle_shift("v", (2, 2), "2024-01-02T00:00:00Z")
+        vehicle = problem.to_dict()["fleet"]["vehicles"][0]
+        self.assertEqual(len(vehicle["shifts"]), 2)
+        self.assertEqual(vehicle["shifts"][1]["start"]["location"]["lat"], 2.0)
+
+    def test_location_index(self):
+        problem = Problem.empty().add_delivery("d1", 5, [1])
+        place = problem.to_dict()["plan"]["jobs"][0]["deliveries"][0]["places"][0]
+        self.assertEqual(place["location"], {"index": 5})
+
+    def test_set_vehicle_open_end(self):
+        problem = self._base_vehicle_problem().set_vehicle_open_end("v")
+        vehicle = problem.to_dict()["fleet"]["vehicles"][0]
+        self.assertNotIn("end", vehicle["shifts"][0])
+
+    def test_set_vehicle_dispatch(self):
+        problem = self._base_vehicle_problem().set_vehicle_dispatch("v", "2024-01-01T12:00:00Z")
+        vehicle = problem.to_dict()["fleet"]["vehicles"][0]
+        self.assertEqual(vehicle["shifts"][0]["start"]["latest"], "2024-01-01T12:00:00Z")
+
+    def test_set_profile_scale(self):
+        problem = self._base_vehicle_problem().set_profile_scale("v", 1.5)
+        vehicle = problem.to_dict()["fleet"]["vehicles"][0]
+        self.assertEqual(vehicle["profile"]["scale"], 1.5)
+
+    def test_set_matrix_profile_speed(self):
+        problem = self._base_vehicle_problem().set_matrix_profile_speed("normal_car", 25.0)
+        profile = problem.to_dict()["fleet"]["profiles"][0]
+        self.assertEqual(profile["speed"], 25.0)
+
+
+    def test_validate_dimensions(self):
+        problem = Problem.empty().add_vehicle("v", start_location=(0, 0), start_earliest="2024-01-01T00:00:00Z", capacity=[1, 2])
+        problem.add_delivery("d1", (1, 1), [1, 2])
+        problem.validate_dimensions()  # Should pass
+
+        problem.add_delivery("d2", (2, 2), [1, 2, 3])
+        with self.assertRaises(ValueError):
+            problem.validate_dimensions()
+
+    def test_validate_problem(self):
+        problem = Problem.empty()
+        with self.assertRaises(ValueError):
+            problem.validate_problem()  # No vehicles
+            
+        problem.add_vehicle("v", start_location=(0, 0), start_earliest="2024-01-01T00:00:00Z", capacity=[1])
+        with self.assertRaises(ValueError):
+            problem.validate_problem()  # No jobs
+            
+        problem.add_delivery("d1", (1, 1), [1])
+        problem.validate_problem()  # Should pass
 
     def test_add_multiple_deliveries(self):
         problem = (

@@ -53,7 +53,41 @@ class Problem(JsonAsset):
         return RoutingLocations.from_json(vrp_cli.get_routing_locations(self.to_json()))
 
     def validate(self, matrices: Optional[Iterable[JsonInput]] = None) -> None:
+        """Run native validation on the problem and optionally matrices."""
+        from . import validate
+
         validate(self, matrices)
+
+    def validate_dimensions(self) -> None:
+        """Validate that all capacities and demands have consistent multi-dimensional lengths."""
+        dim = None
+
+        for v in self._vehicles():
+            cap = v.get("capacity")
+            if cap is not None:
+                if dim is None:
+                    dim = len(cap)
+                elif len(cap) != dim:
+                    raise ValueError(f"Vehicle type '{v.get('typeId')}' capacity dimension {len(cap)} mismatches expected {dim}")
+
+        for job in self._jobs():
+            for task_type in ["pickups", "deliveries", "replacements", "services"]:
+                for task in job.get(task_type, []):
+                    dem = task.get("demand")
+                    if dem is not None:
+                        if dim is None:
+                            dim = len(dem)
+                        elif len(dem) != dim:
+                            raise ValueError(f"Job '{job.get('id')}' demand dimension {len(dem)} mismatches expected {dim}")
+
+    def validate_problem(self) -> None:
+        """Run basic Python-level validations on the problem before calling native bindings."""
+        self.validate_dimensions()
+        # Ensure we have at least one vehicle and one job
+        if not self._vehicles():
+            raise ValueError("Problem must have at least one vehicle.")
+        if not self._jobs():
+            raise ValueError("Problem must have at least one job.")
 
     def add_delivery(
         self,
@@ -64,9 +98,10 @@ class Problem(JsonAsset):
         duration: Union[int, float] = 0,
         times: Optional[Sequence[Sequence[str]]] = None,
         tag: Optional[str] = None,
+        order: Optional[int] = None,
         **extra: Any,
     ) -> "Problem":
-        return self._add_job_task(job_id, "deliveries", location, demand, duration=duration, times=times, tag=tag, **extra)
+        return self._add_job_task(job_id, "deliveries", location, demand, duration=duration, times=times, tag=tag, order=order, **extra)
 
     def add_pickup(
         self,
@@ -77,9 +112,10 @@ class Problem(JsonAsset):
         duration: Union[int, float] = 0,
         times: Optional[Sequence[Sequence[str]]] = None,
         tag: Optional[str] = None,
+        order: Optional[int] = None,
         **extra: Any,
     ) -> "Problem":
-        return self._add_job_task(job_id, "pickups", location, demand, duration=duration, times=times, tag=tag, **extra)
+        return self._add_job_task(job_id, "pickups", location, demand, duration=duration, times=times, tag=tag, order=order, **extra)
 
     def add_pickup_delivery(
         self,
@@ -94,28 +130,21 @@ class Problem(JsonAsset):
         delivery_times: Optional[Sequence[Sequence[str]]] = None,
         pickup_tag: Optional[str] = None,
         delivery_tag: Optional[str] = None,
+        pickup_order: Optional[int] = None,
+        delivery_order: Optional[int] = None,
         **extra: Any,
     ) -> "Problem":
+        pickup_task = _task(pickup_location, demand, duration=pickup_duration, times=pickup_times, tag=pickup_tag)
+        if pickup_order is not None:
+            pickup_task["order"] = pickup_order
+        delivery_task = _task(delivery_location, demand, duration=delivery_duration, times=delivery_times, tag=delivery_tag)
+        if delivery_order is not None:
+            delivery_task["order"] = delivery_order
+
         job = {
             "id": job_id,
-            "pickups": [
-                _task(
-                    pickup_location,
-                    demand,
-                    duration=pickup_duration,
-                    times=pickup_times,
-                    tag=pickup_tag,
-                )
-            ],
-            "deliveries": [
-                _task(
-                    delivery_location,
-                    demand,
-                    duration=delivery_duration,
-                    times=delivery_times,
-                    tag=delivery_tag,
-                )
-            ],
+            "pickups": [pickup_task],
+            "deliveries": [delivery_task],
         }
         job.update(extra)
         self._jobs().append(job)
@@ -209,6 +238,113 @@ class Problem(JsonAsset):
         """Set the value of an already-added job (used with maximize-value objective)."""
         self._find_job(job_id)["value"] = value
         return self
+
+    def set_job_group(self, job_id: str, group: str) -> "Problem":
+        """Set the job group. Jobs in the same group are assigned to the same tour or unassigned together."""
+        self._find_job(job_id)["group"] = group
+        return self
+
+    def set_job_compatibility(self, job_id: str, compatibility: str) -> "Problem":
+        """Set the compatibility group. Jobs with different compatibility cannot be in the same tour."""
+        self._find_job(job_id)["compatibility"] = compatibility
+        return self
+
+    def add_vehicle_recharge(
+        self,
+        vehicle_type_id: str,
+        max_distance: Union[int, float],
+        stations: Sequence[Dict[str, Any]],
+        shift_index: int = 0,
+    ) -> "Problem":
+        """Add recharge stations to a vehicle's shift."""
+        vehicle = self._find_vehicle(vehicle_type_id)
+        shift = vehicle["shifts"][shift_index]
+        shift["recharges"] = {
+            "maxDistance": max_distance,
+            "stations": list(stations),
+        }
+        return self
+
+    def add_vehicle_reload_resource(
+        self,
+        resource_id: str,
+        capacity: Sequence[int],
+    ) -> "Problem":
+        """Add a shared reload resource to the fleet."""
+        resources = self._data.setdefault("fleet", {}).setdefault("resources", [])
+        resources.append({"type": "reload", "id": resource_id, "capacity": list(capacity)})
+        return self
+
+    def add_multi_place_task(
+        self,
+        job_id: str,
+        task_type: str,
+        places: Sequence[Dict[str, Any]],
+        demand: Sequence[int],
+        *,
+        order: Optional[int] = None,
+        **extra: Any,
+    ) -> "Problem":
+        """Add a job with a task that has multiple alternative places."""
+        task: Dict[str, Any] = {"places": list(places), "demand": list(demand)}
+        if order is not None:
+            task["order"] = order
+        job = {"id": job_id, task_type: [task]}
+        job.update(extra)
+        self._jobs().append(job)
+        return self
+
+    def add_vehicle_shift(
+        self,
+        vehicle_type_id: str,
+        start_location: Any,
+        start_earliest: str,
+        end_location: Optional[Any] = None,
+        end_latest: Optional[str] = None,
+    ) -> "Problem":
+        """Add an additional shift to an existing vehicle type."""
+        vehicle = self._find_vehicle(vehicle_type_id)
+        shift: Dict[str, Any] = {
+            "start": {
+                "earliest": start_earliest,
+                "location": _location(start_location),
+            },
+        }
+        if end_location is not None or end_latest is not None:
+            shift["end"] = {
+                "latest": end_latest or start_earliest,
+                "location": _location(end_location or start_location),
+            }
+        vehicle["shifts"].append(shift)
+        return self
+
+    def set_vehicle_open_end(self, vehicle_type_id: str, shift_index: int = 0) -> "Problem":
+        """Remove the end location from a vehicle's shift, making it an open route."""
+        vehicle = self._find_vehicle(vehicle_type_id)
+        shift = vehicle["shifts"][shift_index]
+        shift.pop("end", None)
+        return self
+
+    def set_vehicle_dispatch(self, vehicle_type_id: str, latest: str, shift_index: int = 0) -> "Problem":
+        """Limit departure time optimization by setting a latest start time."""
+        vehicle = self._find_vehicle(vehicle_type_id)
+        shift = vehicle["shifts"][shift_index]
+        shift["start"]["latest"] = latest
+        return self
+
+    def set_profile_scale(self, vehicle_type_id: str, scale: float) -> "Problem":
+        """Set the duration scale factor for a vehicle type's profile."""
+        vehicle = self._find_vehicle(vehicle_type_id)
+        vehicle["profile"]["scale"] = scale
+        return self
+
+    def set_matrix_profile_speed(self, profile_name: str, speed: float) -> "Problem":
+        """Set the approximation speed (m/s) for a matrix profile (used when matrix is omitted)."""
+        for profile in self._profiles():
+            if profile.get("name") == profile_name:
+                profile["speed"] = speed
+                return self
+        raise KeyError(f"Matrix profile '{profile_name}' not found.")
 
     def add_vehicle_break(
         self,
@@ -346,9 +482,13 @@ class Problem(JsonAsset):
         duration: Union[int, float],
         times: Optional[Sequence[Sequence[str]]],
         tag: Optional[str],
+        order: Optional[int] = None,
         **extra: Any,
     ) -> "Problem":
-        job = {"id": job_id, task_type: [_task(location, demand, duration=duration, times=times, tag=tag)]}
+        task = _task(location, demand, duration=duration, times=times, tag=tag)
+        if order is not None:
+            task["order"] = order
+        job = {"id": job_id, task_type: [task]}
         job.update(extra)
         self._jobs().append(job)
         return self
@@ -1437,13 +1577,16 @@ def _location(location: Any) -> Dict[str, Any]:
     if isinstance(location, dict):
         return deepcopy(location)
 
+    if isinstance(location, int):
+        return {"index": location}
+
     if isinstance(location, (list, tuple)) and len(location) == 2:
         return {"lat": location[0], "lng": location[1]}
 
     if hasattr(location, "lat") and hasattr(location, "lng"):
         return {"lat": location.lat, "lng": location.lng}
 
-    raise ValueError("location must be a dict, a (lat, lng) pair, or an object with lat/lng attributes")
+    raise ValueError("location must be a dict, an integer index, a (lat, lng) pair, or an object with lat/lng attributes")
 
 
 def _read_json(source: JsonInput) -> JsonData:
