@@ -1,0 +1,149 @@
+# Python Interface TODO
+
+Track pragmatic Python interface coverage here. Check an item only when the
+Python facade has a documented API and at least one test or example covering it.
+
+## Core Assets
+
+- [x] `Problem` JSON asset: `from_json`, `from_dict`, `to_dict`, `to_json`, `write_json`
+- [x] `RoutingMatrix` JSON asset with Python `durations` API and pragmatic `travelTimes` serialization
+- [x] `Config` JSON asset: raw JSON passthrough plus common builder helpers
+- [x] `InitialSolution` JSON asset
+- [x] `Solution` JSON asset with `statistic` and `tours` accessors
+- [x] `RoutingLocations` JSON asset
+
+## Solver Entry Points
+
+- [x] `solve(problem, matrices, config)`
+- [x] `solve(..., on_iteration=..., every=...)`
+- [x] `solve(..., initial_solution=...)`
+- [x] `solve(..., initial_solution=..., on_iteration=...)`
+- [x] `validate(problem, matrices)`
+- [x] `get_locations(problem)`
+- [ ] Convert other supported formats to pragmatic through Python facade
+- [ ] Expose solution feasibility/checker API
+- [ ] Expose geojson output as a first-class Python object/helper
+
+## Problem Builder
+
+- [x] Empty problem builder: `Problem.empty()`
+- [x] Delivery job helper
+- [x] Pickup job helper
+- [x] Pickup-delivery job helper
+- [x] Vehicle helper with basic shift, capacity, profile, costs
+- [x] Profile helper
+- [x] Raw relation helper
+- [x] Raw objectives setter
+- [ ] Service job helper
+- [ ] Multi-place task helper
+- [ ] Job skills helper
+- [ ] Job priority helper
+- [ ] Job value helper
+- [ ] Job group/compatibility helpers
+- [ ] Job order/sequence constraints helper
+- [ ] Relation typed helpers for all pragmatic relation types
+- [ ] Objective typed helpers for all pragmatic objective types
+- [ ] Vehicle multi-shift helper
+- [ ] Vehicle break helper
+- [ ] Vehicle reload helper
+- [ ] Vehicle recharge helper
+- [ ] Vehicle resource helper
+- [ ] Vehicle dispatch/open route helper
+- [ ] Vehicle limits helper
+- [ ] Vehicle skills helper
+- [ ] Fleet profile speed/scale helper
+- [ ] Location index helper
+- [ ] Multi-dimensional capacity/demand validation
+- [ ] Problem-level validation helpers before calling native binding
+
+## Routing Matrix
+
+- [x] Single matrix asset
+- [x] Multiple matrices passed to `solve`
+- [x] Optional `timestamp` field for time-dependent matrices
+- [ ] Matrix collection helper
+- [ ] Matrix profile consistency validation against `fleet.profiles`
+- [ ] Matrix dimension validation against routing locations
+- [ ] Time-dependent matrix helper for multiple timestamps per profile
+- [ ] Location list to external routing service workflow helper
+- [ ] Matrix construction from 2D duration/distance arrays
+
+## Config
+
+- [x] Termination helper: `maxTime`, `maxGenerations`
+- [x] Variation/min-CV helper
+- [x] Environment parallelism helper
+- [x] Environment logging helper
+- [x] Experimental flag helper
+- [x] Telemetry progress helper
+- [x] Telemetry metrics helper
+- [x] Output `includeGeojson` helper
+- [x] Evolution initial helper
+- [x] Recreate method helpers
+- [x] Population helpers: greedy, elitism, rosomaxa
+- [x] Hyper helpers: dynamic/static selective
+- [x] Hyper operator helper: decomposition
+- [x] Hyper operator helper: local search
+- [x] Hyper operator helper: ruin recreate
+- [x] Local operator helpers
+- [x] Ruin method helpers
+- [x] Probability helpers
+- [ ] Config presets for common solve modes
+- [ ] Full typed model for `evolution.initial.alternatives`
+- [ ] Full typed model for `hyper.static-selective.operators`
+- [ ] Parameter validation for recreate/population/hyper helpers
+- [ ] Config merge/overlay helper
+- [ ] Config export/import examples for full config
+
+## Solution And Initial Solution
+
+- [x] Read/write solution JSON asset
+- [x] Pass initial solution JSON to native binding
+- [ ] Strong typed solution model
+- [ ] Route/tour accessor helpers
+- [ ] Stop/activity accessor helpers
+- [ ] Unassigned jobs accessor helpers
+- [ ] Initial solution route builder
+- [ ] Initial solution unassigned helper
+- [ ] Solution to geojson helper
+- [ ] Solution summary/statistics helper
+
+## Examples
+
+- [x] Basic builder example
+- [x] JSON assets example
+- [x] Callback example
+- [x] Initial solution example
+- [x] Hyper config example
+- [x] README usage guide
+- [ ] Objectives example
+- [ ] Relations example
+- [ ] Break/reload/recharge example
+- [ ] Time-dependent matrix example
+- [ ] Location index example
+- [ ] Multi-profile matrix example
+- [ ] Solution inspection example
+
+## Tests
+
+- [x] Routing matrix `durations` serialization test
+- [x] Config builder serialization test
+- [x] Problem builder serialization test
+- [x] Initial solution binding dispatch test
+- [x] Evolution helper serialization test
+- [x] Hyper helper serialization test
+- [ ] Objective helper tests
+- [ ] Relation helper tests
+- [ ] Vehicle advanced helper tests
+- [ ] Routing matrix validation tests
+- [ ] Initial solution builder tests
+- [ ] Native `vrp_cli` integration tests
+
+## Packaging
+
+- [ ] Decide final Python package layout
+- [ ] Move facade out of `examples` when package layout is decided
+- [ ] Add build instructions for PyO3/maturin or project-specific flow
+- [ ] Add API reference docs
+- [ ] Add CI step for Python facade tests
+- [ ] Add CI step for `cargo check --features py_bindings`

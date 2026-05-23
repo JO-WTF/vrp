@@ -1,13 +1,13 @@
-# Contains semi-automatically generated non-complete model of config format.
-# Please refer to documentation to define a full model
+# Contains semi-automatically generated model of solver config format.
 
 from __future__ import annotations
 from pydantic.dataclasses import dataclass
+from dataclasses import field
 try:
     from pydantic.dataclasses import rebuild_dataclass
 except ImportError:
     rebuild_dataclass = None
-from typing import Optional
+from typing import Any, Dict, Optional
 
 
 def _update_forward_refs(*classes):
@@ -22,52 +22,95 @@ def _update_forward_refs(*classes):
 
 @dataclass
 class Telemetry:
-    progress: Progress
+    progress: Optional[Progress] = None
+    metrics: Optional[Metrics] = None
 
 
 @dataclass
 class Progress:
     enabled: bool
-    logBest: int
-    logPopulation: int
-    dumpPopulation: bool
+    logBest: Optional[int] = None
+    logPopulation: Optional[int] = None
 
 
-_update_forward_refs(Telemetry)
+@dataclass
+class Metrics:
+    enabled: bool
+    trackPopulation: Optional[int] = None
 
 
 @dataclass
 class Config:
-    termination: Termination
-    telemetry: Optional[Telemetry] = Telemetry(
-        progress=Progress(
-            enabled=True,
-            logBest=100,
-            logPopulation=1000,
-            dumpPopulation=False
-        )
-    )
+    evolution: Optional[Evolution] = None
+    hyper: Optional[Dict[str, Any]] = None
+    termination: Optional[Termination] = None
+    telemetry: Optional[Telemetry] = None
     environment: Optional[Environment] = None
+    output: Optional[Output] = None
 
 
 @dataclass
 class Termination:
     maxTime: Optional[int] = None
     maxGenerations: Optional[int] = None
+    variation: Optional[Variation] = None
+
+
+@dataclass
+class Variation:
+    intervalType: str
+    value: int
+    cv: float
+    isGlobal: bool = True
 
 
 @dataclass
 class Logging:
     enabled: bool
+    prefix: Optional[str] = None
 
 
-_update_forward_refs(Logging)
+@dataclass
+class Parallelism:
+    numThreadPools: int
+    threadsPerPool: int
 
 
 @dataclass
 class Environment:
-    logging: Logging = Logging(enabled=True)
+    parallelism: Optional[Parallelism] = None
+    logging: Optional[Logging] = None
     isExperimental: Optional[bool] = None
 
 
-_update_forward_refs(Config, Telemetry, Termination, Environment)
+@dataclass
+class Output:
+    includeGeojson: Optional[bool] = None
+
+
+@dataclass
+class Initial:
+    method: Dict[str, Any]
+    alternatives: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class Evolution:
+    initial: Optional[Initial] = None
+    population: Optional[Dict[str, Any]] = None
+
+
+_update_forward_refs(
+    Config,
+    Telemetry,
+    Progress,
+    Metrics,
+    Termination,
+    Variation,
+    Environment,
+    Logging,
+    Parallelism,
+    Output,
+    Initial,
+    Evolution,
+)

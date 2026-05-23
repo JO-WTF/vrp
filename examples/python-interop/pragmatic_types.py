@@ -28,6 +28,7 @@ class RoutingMatrix:
     profile: str
     durations: List[int]
     distances: List[int]
+    timestamp: Optional[str] = None
 
 
 # Problem

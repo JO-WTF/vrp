@@ -1,29 +1,21 @@
-import vrp_cli
 import pragmatic_types as prg
-import config_types as cfg
-import json
-from pydantic.json import pydantic_encoder
+from vrp import Config, Problem, RoutingMatrix, solve
 
 # if you want to use approximation, you can skip this definition and pass empty list later
 # also there is a get_locations method to get list of locations in expected order.
 # you can use this list to fetch routing matrix externally
-matrix = prg.RoutingMatrix(
+matrix = RoutingMatrix(
     profile='normal_car',
     durations=[0, 609, 981, 906, 813, 0, 371, 590, 1055, 514, 0, 439, 948, 511, 463, 0],
-    distances=[0, 3840, 5994, 5333, 4696, 0, 2154, 3226, 5763, 2674, 0, 2145, 5112, 2470, 2152, 0]
+    distances=[0, 3840, 5994, 5333, 4696, 0, 2154, 3226, 5763, 2674, 0, 2145, 5112, 2470, 2152, 0],
 )
 
 
 # specify termination criteria: max running time in seconds or max amount of refinement generations
-config = cfg.Config(
-    termination=cfg.Termination(
-        maxTime=5,
-        maxGenerations=1000
-    )
-)
+config = Config(max_time=5, max_generations=1000)
 
 # specify test problem
-problem = prg.Problem(
+problem = Problem(prg.Problem(
     plan=prg.Plan(
         jobs=[
             prg.Job(
@@ -110,17 +102,10 @@ problem = prg.Problem(
         profiles=[prg.RoutingProfile(name='normal_car')]
     )
 
-)
+))
 
-# run solver and deserialize result into solution model
-problem_json = json.dumps(problem, default=pydantic_encoder)
-matrix_json = json.dumps(matrix, default=pydantic_encoder)
-config_json = json.dumps(config, default=pydantic_encoder)
-
-
-def on_iteration(generation, solution_json):
-    solution = json.loads(solution_json)
-    statistic = solution["statistic"]
+def on_iteration(generation, solution):
+    statistic = solution.statistic
     print(
         "iteration callback:",
         f"generation={generation}",
@@ -130,23 +115,12 @@ def on_iteration(generation, solution_json):
     )
 
 
-solve_with_callback = getattr(vrp_cli, "solve_pragmatic_with_callback", None)
-
-if solve_with_callback is not None:
-    solution_json = solve_with_callback(
-        problem=problem_json,
-        matrices=[matrix_json],
-        config=config_json,
-        callback=on_iteration,
-        every=100,
-    )
-else:
-    solution_json = vrp_cli.solve_pragmatic(
-        problem=problem_json,
-        matrices=[matrix_json],
-        config=config_json,
-    )
-
-solution = prg.Solution(**json.loads(solution_json))
+solution = solve(
+    problem=problem,
+    matrices=[matrix],
+    config=config,
+    on_iteration=on_iteration,
+    every=100,
+)
 
 print(solution)
