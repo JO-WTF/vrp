@@ -147,32 +147,69 @@ class VrpFacadeTest(unittest.TestCase):
         self.assertEqual(data["fleet"]["vehicles"][0]["vehicleIds"], ["vehicle_1"])
         self.assertEqual(data["fleet"]["profiles"][0]["name"], "normal_car")
 
-    def test_solve_with_initial_solution_uses_init_binding(self):
-        fake_vrp_cli = types.SimpleNamespace()
-        calls = []
-
-        def solve_pragmatic_with_init(**kwargs):
-            calls.append(kwargs)
-            return '{"statistic": {}, "tours": []}'
-
-        fake_vrp_cli.solve_pragmatic_with_init = solve_pragmatic_with_init
-        previous = sys.modules.get("vrp_cli")
-        sys.modules["vrp_cli"] = fake_vrp_cli
-        try:
-            solution = solve(
-                Problem.empty(),
-                config=Config(max_generations=1),
-                initial_solution=InitialSolution({"statistic": {}, "tours": []}),
+    def test_initial_solution_builder(self):
+        init = (
+            InitialSolution()
+            .add_tour(
+                "v1", "vehicle",
+                [
+                    InitialSolution.create_stop(
+                        (0, 0),
+                        [InitialSolution.create_activity("departure", "departure")],
+                    ),
+                    InitialSolution.create_stop(
+                        (1, 1),
+                        [InitialSolution.create_activity("j1", "pickup")],
+                        time=["2020-01-01T10:00:00Z"],
+                    ),
+                ],
+                shift_index=1,
             )
-        finally:
-            if previous is None:
-                sys.modules.pop("vrp_cli", None)
-            else:
-                sys.modules["vrp_cli"] = previous
+            .add_unassigned("j2", "code1", "too far")
+        )
 
-        self.assertEqual(solution.tours, [])
-        self.assertEqual(len(calls), 1)
-        self.assertIn("init_solution", calls[0])
+        d = init.to_dict()
+        self.assertEqual(len(d["tours"]), 1)
+        self.assertEqual(d["tours"][0]["vehicleId"], "v1")
+        self.assertEqual(d["tours"][0]["shiftIndex"], 1)
+        self.assertEqual(len(d["tours"][0]["stops"]), 2)
+        self.assertEqual(d["tours"][0]["stops"][1]["time"]["departure"], "2020-01-01T10:00:00Z")
+        self.assertEqual(d["tours"][0]["stops"][1]["activities"][0]["jobId"], "j1")
+        
+        self.assertEqual(len(d["unassigned"]), 1)
+        self.assertEqual(d["unassigned"][0]["jobId"], "j2")
+
+    def test_solve_with_initial_solution_runs(self):
+        problem = (
+            Problem.empty()
+            .add_vehicle("v", start_location=(0, 0), start_earliest="2020-01-01T00:00:00Z", capacity=[1], costs={"fixed": 0, "distance": 1, "time": 1})
+            .add_delivery("j1", (1, 1), [1])
+        )
+        init = (
+            InitialSolution()
+            .add_tour(
+                "v", "vehicle",
+                [
+                    InitialSolution.create_stop(
+                        (0, 0),
+                        [InitialSolution.create_activity("departure", "departure")],
+                    ),
+                    InitialSolution.create_stop(
+                        (1, 1),
+                        [InitialSolution.create_activity("j1", "delivery")],
+                    ),
+                ]
+            )
+        )
+        
+        solution = solve(
+            problem,
+            config=Config(max_generations=1),
+            initial_solution=init,
+        )
+
+        self.assertEqual(len(solution.tours), 1)
+        self.assertEqual(solution.tours[0]["vehicleId"], "v")
 
 
 class JsonAssetTest(unittest.TestCase):
@@ -201,6 +238,27 @@ class JsonAssetTest(unittest.TestCase):
             timestamp="2024-01-01T00:00:00Z",
         )
         self.assertEqual(matrix.to_dict()["timestamp"], "2024-01-01T00:00:00Z")
+
+    def test_matrix_collection_add_time_dependent(self):
+        col = MatrixCollection()
+        col.add_time_dependent(
+            "car",
+            {
+                "2024-01-01T08:00:00Z": {"durations": [0, 1], "distances": [0, 2]},
+                "2024-01-01T10:00:00Z": {"durations": [0, 5], "distances": [0, 2]},
+            }
+        )
+        matrices = col.to_list()
+        self.assertEqual(len(matrices), 2)
+        m1 = matrices[0].to_dict()
+        m2 = matrices[1].to_dict()
+        self.assertEqual(m1["profile"], "car")
+        self.assertEqual(m1["timestamp"], "2024-01-01T08:00:00Z")
+        self.assertEqual(m1["travelTimes"], [0, 1])
+        
+        self.assertEqual(m2["profile"], "car")
+        self.assertEqual(m2["timestamp"], "2024-01-01T10:00:00Z")
+        self.assertEqual(m2["travelTimes"], [0, 5])
 
     def test_config_from_dict(self):
         config = Config.from_dict({"termination": {"maxTime": 60, "maxGenerations": 2000}})

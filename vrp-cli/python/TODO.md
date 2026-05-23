@@ -64,7 +64,7 @@ Python facade has a documented API and at least one test or example covering it.
 - [x] Matrix collection helper
 - [ ] Matrix profile consistency validation against `fleet.profiles`
 - [ ] Matrix dimension validation against routing locations
-- [ ] Time-dependent matrix helper for multiple timestamps per profile
+- [x] Time-dependent matrix helper for multiple timestamps per profile
 - [ ] Location list to external routing service workflow helper
 - [x] Matrix construction from 2D duration/distance arrays
 
@@ -103,8 +103,8 @@ Python facade has a documented API and at least one test or example covering it.
 - [x] Route/tour accessor helpers
 - [x] Stop/activity accessor helpers
 - [x] Unassigned jobs accessor helpers
-- [ ] Initial solution route builder
-- [ ] Initial solution unassigned helper
+- [x] Initial solution route builder
+- [x] Initial solution unassigned helper
 - [ ] Solution to geojson helper
 - [x] Solution summary/statistics helper
 

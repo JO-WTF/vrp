@@ -697,6 +697,27 @@ class MatrixCollection:
         self._matrices.append(matrix)
         return self
 
+    def add_time_dependent(
+        self,
+        profile: str,
+        timestamp_to_data: Dict[str, Dict[str, Sequence[Union[int, float]]]],
+    ) -> "MatrixCollection":
+        """Register multiple matrices for the same profile across different timestamps.
+        
+        The dictionary maps RFC3339 timestamps to dictionaries containing 
+        ``durations`` and ``distances`` sequences.
+        """
+        for timestamp, data in timestamp_to_data.items():
+            self._matrices.append(
+                RoutingMatrix(
+                    profile=profile,
+                    timestamp=timestamp,
+                    durations=data.get("durations"),
+                    distances=data.get("distances"),
+                )
+            )
+        return self
+
     def to_list(self) -> List[RoutingMatrix]:
         """Return a plain list suitable for the ``matrices`` argument of :func:`solve`."""
         return list(self._matrices)
@@ -1143,6 +1164,105 @@ def min_max(min: int, max: int) -> Dict[str, int]:
 
 class InitialSolution(JsonAsset):
     """Initial solution asset."""
+
+    def __init__(self, data: Optional[JsonData] = None):
+        if data is None:
+            data = {"statistic": self._dummy_statistic(), "tours": [], "unassigned": []}
+        super().__init__(data)
+
+    @classmethod
+    def from_json(cls, source: JsonInput) -> "InitialSolution":
+        return cls(_read_json(source))
+
+    @classmethod
+    def from_dict(cls, data: JsonData) -> "InitialSolution":
+        return cls(data)
+
+    def add_tour(
+        self,
+        vehicle_id: str,
+        type_id: str,
+        stops: Sequence[Dict[str, Any]],
+        shift_index: int = 0,
+    ) -> "InitialSolution":
+        """Add a tour to the initial solution.
+        
+        A tour requires stops. You can use :meth:`create_stop` to build them.
+        """
+        tour = {
+            "vehicleId": vehicle_id,
+            "typeId": type_id,
+            "shiftIndex": shift_index,
+            "statistic": self._dummy_statistic(),
+            "stops": list(stops),
+        }
+        self._data.setdefault("tours", []).append(tour)
+        return self
+
+    def add_unassigned(
+        self,
+        job_id: str,
+        code: str,
+        description: str,
+    ) -> "InitialSolution":
+        """Add a job to the unassigned list."""
+        unassigned = {
+            "jobId": job_id,
+            "reasons": [{"code": code, "description": description}],
+        }
+        self._data.setdefault("unassigned", []).append(unassigned)
+        return self
+
+    @staticmethod
+    def create_stop(
+        location: Any,
+        activities: Sequence[Dict[str, Any]],
+        time: Optional[Sequence[str]] = None,
+        load: Optional[Sequence[int]] = None,
+        distance: int = 0,
+    ) -> Dict[str, Any]:
+        """Helper to create a stop dictionary for an initial solution.
+        
+        Dummy values are provided for time, load, and distance if not specified.
+        """
+        from . import _location
+
+        arrival = time[0] if time else "1970-01-01T00:00:00Z"
+        departure = time[1] if time and len(time) > 1 else arrival
+        
+        return {
+            "location": _location(location),
+            "time": {"arrival": arrival, "departure": departure},
+            "distance": distance,
+            "load": list(load) if load is not None else [0],
+            "activities": list(activities),
+        }
+
+    @staticmethod
+    def create_activity(job_id: str, activity_type: str, **kwargs: Any) -> Dict[str, Any]:
+        """Helper to create an activity dictionary.
+        
+        Types can be 'pickup', 'delivery', 'service', 'departure', 'arrival', 'break', 'reload', 'recharge'.
+        """
+        activity = {"jobId": job_id, "type": activity_type}
+        activity.update(kwargs)
+        return activity
+
+    @staticmethod
+    def _dummy_statistic() -> Dict[str, Any]:
+        return {
+            "cost": 0,
+            "distance": 0,
+            "duration": 0,
+            "times": {
+                "driving": 0,
+                "serving": 0,
+                "waiting": 0,
+                "break": 0,
+                "commuting": 0,
+                "parking": 0,
+            },
+        }
 
 
 class Solution(JsonAsset):
