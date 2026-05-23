@@ -963,9 +963,9 @@ class Config(JsonAsset):
 
     def set_initial(
         self,
-        method: Dict[str, Any],
+        method: RecreateMethod,
         *,
-        alternatives: Optional[Sequence[Dict[str, Any]]] = None,
+        alternatives: Optional[Sequence[RecreateMethod]] = None,
         max_size: int = 4,
         quota: float = 0.05,
     ) -> "Config":
@@ -1060,62 +1060,86 @@ class Config(JsonAsset):
                             raise ValueError(f"Hyper operator weight must be > 0, got {sub_op['weight']}")
 
 
+class RecreateMethod(dict):
+    """Evolution recreate method config."""
+
+
+class RuinMethod(dict):
+    """Evolution ruin method config."""
+
+
+class PopulationType(dict):
+    """Evolution population config."""
+
+
+class LocalOperatorType(dict):
+    """Local search operator config."""
+
+
+class HyperMethod(dict):
+    """Hyper heuristic configuration."""
+
+
+class ProbabilityConfig(dict):
+    """Probability configuration."""
+
+
 class Recreate:
     """Factory helpers for evolution recreate methods."""
 
     @staticmethod
-    def cheapest(*, weight: int = 1) -> Dict[str, Any]:
-        return {"type": "cheapest", "weight": weight}
+    def cheapest(*, weight: int = 1) -> RecreateMethod:
+        return RecreateMethod({"type": "cheapest", "weight": weight})
 
     @staticmethod
-    def farthest(*, weight: int = 1) -> Dict[str, Any]:
-        return {"type": "farthest", "weight": weight}
+    def farthest(*, weight: int = 1) -> RecreateMethod:
+        return RecreateMethod({"type": "farthest", "weight": weight})
 
     @staticmethod
-    def nearest(*, weight: int = 1) -> Dict[str, Any]:
-        return {"type": "nearest", "weight": weight}
+    def nearest(*, weight: int = 1) -> RecreateMethod:
+        return RecreateMethod({"type": "nearest", "weight": weight})
 
     @staticmethod
-    def blinks(*, weight: int = 1) -> Dict[str, Any]:
-        return {"type": "blinks", "weight": weight}
+    def blinks(*, weight: int = 1) -> RecreateMethod:
+        return RecreateMethod({"type": "blinks", "weight": weight})
 
     @staticmethod
-    def skip_random(*, weight: int = 1) -> Dict[str, Any]:
-        return {"type": "skip-random", "weight": weight}
+    def skip_random(*, weight: int = 1) -> RecreateMethod:
+        return RecreateMethod({"type": "skip-random", "weight": weight})
 
     @staticmethod
-    def slice(*, weight: int = 1) -> Dict[str, Any]:
-        return {"type": "slice", "weight": weight}
+    def slice(*, weight: int = 1) -> RecreateMethod:
+        return RecreateMethod({"type": "slice", "weight": weight})
 
     @staticmethod
-    def skip_best(start: int, end: int, *, weight: int = 1) -> Dict[str, Any]:
-        return {"type": "skip-best", "start": start, "end": end, "weight": weight}
+    def skip_best(start: int, end: int, *, weight: int = 1) -> RecreateMethod:
+        return RecreateMethod({"type": "skip-best", "start": start, "end": end, "weight": weight})
 
     @staticmethod
-    def regret(start: int, end: int, *, weight: int = 1) -> Dict[str, Any]:
-        return {"type": "regret", "start": start, "end": end, "weight": weight}
+    def regret(start: int, end: int, *, weight: int = 1) -> RecreateMethod:
+        return RecreateMethod({"type": "regret", "start": start, "end": end, "weight": weight})
 
     @staticmethod
-    def gaps(min: int, max: int, *, weight: int = 1) -> Dict[str, Any]:
-        return {"type": "gaps", "min": min, "max": max, "weight": weight}
+    def gaps(min: int, max: int, *, weight: int = 1) -> RecreateMethod:
+        return RecreateMethod({"type": "gaps", "min": min, "max": max, "weight": weight})
 
     @staticmethod
-    def perturbation(probability: float, min: float, max: float, *, weight: int = 1) -> Dict[str, Any]:
-        return {"type": "perturbation", "probability": probability, "min": min, "max": max, "weight": weight}
+    def perturbation(probability: float, min: float, max: float, *, weight: int = 1) -> RecreateMethod:
+        return RecreateMethod({"type": "perturbation", "probability": probability, "min": min, "max": max, "weight": weight})
 
 
 class Population:
     """Factory helpers for evolution population config."""
 
     @staticmethod
-    def greedy(*, selection_size: Optional[int] = None) -> Dict[str, Any]:
-        population = {"type": "greedy"}
+    def greedy(*, selection_size: Optional[int] = None) -> PopulationType:
+        population = PopulationType({"type": "greedy"})
         _set_if_not_none(population, "selectionSize", selection_size)
         return population
 
     @staticmethod
-    def elitism(*, max_size: Optional[int] = None, selection_size: Optional[int] = None) -> Dict[str, Any]:
-        population = {"type": "elitism"}
+    def elitism(*, max_size: Optional[int] = None, selection_size: Optional[int] = None) -> PopulationType:
+        population = PopulationType({"type": "elitism"})
         _set_if_not_none(population, "maxSize", max_size)
         _set_if_not_none(population, "selectionSize", selection_size)
         return population
@@ -1130,8 +1154,8 @@ class Population:
         distribution_factor: Optional[float] = None,
         rebalance_memory: Optional[int] = None,
         exploration_ratio: Optional[float] = None,
-    ) -> Dict[str, Any]:
-        population = {"type": "rosomaxa"}
+    ) -> PopulationType:
+        population = PopulationType({"type": "rosomaxa"})
         _set_if_not_none(population, "selectionSize", selection_size)
         _set_if_not_none(population, "maxEliteSize", max_elite_size)
         _set_if_not_none(population, "maxNodeSize", max_node_size)
@@ -1146,8 +1170,8 @@ class Probability:
     """Factory helpers for search operator probabilities."""
 
     @staticmethod
-    def scalar(value: float) -> Dict[str, Any]:
-        return {"scalar": value}
+    def scalar(value: float) -> ProbabilityConfig:
+        return ProbabilityConfig({"scalar": value})
 
     @staticmethod
     def context(
@@ -1155,88 +1179,88 @@ class Probability:
         jobs: int,
         routes: int,
         phases: Sequence[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        return {"threshold": {"jobs": jobs, "routes": routes}, "phases": deepcopy(list(phases))}
+    ) -> ProbabilityConfig:
+        return ProbabilityConfig({"threshold": {"jobs": jobs, "routes": routes}, "phases": deepcopy(list(phases))})
 
     @staticmethod
-    def phase(name: str, chance: float) -> Dict[str, Any]:
-        return {"type": name, "chance": chance}
+    def phase(name: str, chance: float) -> ProbabilityConfig:
+        return ProbabilityConfig({"type": name, "chance": chance})
 
 
 class LocalOperator:
     """Factory helpers for local-search operators."""
 
     @staticmethod
-    def swap_star(*, weight: int = 1) -> Dict[str, Any]:
-        return {"type": "swap-star", "weight": weight}
+    def swap_star(*, weight: int = 1) -> LocalOperatorType:
+        return LocalOperatorType({"type": "swap-star", "weight": weight})
 
     @staticmethod
-    def inter_route_best(*, weight: int = 1, noise: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        return _operator_with_noise("inter-route-best", weight, noise)
+    def inter_route_best(*, weight: int = 1, noise: Optional[Dict[str, Any]] = None) -> LocalOperatorType:
+        return LocalOperatorType(_operator_with_noise("inter-route-best", weight, noise))
 
     @staticmethod
-    def inter_route_random(*, weight: int = 1, noise: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        return _operator_with_noise("inter-route-random", weight, noise)
+    def inter_route_random(*, weight: int = 1, noise: Optional[Dict[str, Any]] = None) -> LocalOperatorType:
+        return LocalOperatorType(_operator_with_noise("inter-route-random", weight, noise))
 
     @staticmethod
-    def intra_route_random(*, weight: int = 1, noise: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        return _operator_with_noise("intra-route-random", weight, noise)
+    def intra_route_random(*, weight: int = 1, noise: Optional[Dict[str, Any]] = None) -> LocalOperatorType:
+        return LocalOperatorType(_operator_with_noise("intra-route-random", weight, noise))
 
     @staticmethod
-    def sequence(*, weight: int = 1) -> Dict[str, Any]:
-        return {"type": "sequence", "weight": weight}
+    def sequence(*, weight: int = 1) -> LocalOperatorType:
+        return LocalOperatorType({"type": "sequence", "weight": weight})
 
 
 class Ruin:
     """Factory helpers for ruin methods."""
 
     @staticmethod
-    def adjusted_string(probability: float, lmax: int, cavg: int, alpha: float) -> Dict[str, Any]:
-        return {"type": "adjusted-string", "probability": probability, "lmax": lmax, "cavg": cavg, "alpha": alpha}
+    def adjusted_string(probability: float, lmax: int, cavg: int, alpha: float) -> RuinMethod:
+        return RuinMethod({"type": "adjusted-string", "probability": probability, "lmax": lmax, "cavg": cavg, "alpha": alpha})
 
     @staticmethod
-    def neighbour(probability: float, min: int, max: int) -> Dict[str, Any]:
-        return {"type": "neighbour", "probability": probability, "min": min, "max": max}
+    def neighbour(probability: float, min: int, max: int) -> RuinMethod:
+        return RuinMethod({"type": "neighbour", "probability": probability, "min": min, "max": max})
 
     @staticmethod
-    def random_job(probability: float, min: int, max: int) -> Dict[str, Any]:
-        return {"type": "random-job", "probability": probability, "min": min, "max": max}
+    def random_job(probability: float, min: int, max: int) -> RuinMethod:
+        return RuinMethod({"type": "random-job", "probability": probability, "min": min, "max": max})
 
     @staticmethod
-    def random_route(probability: float, min: int, max: int) -> Dict[str, Any]:
-        return {"type": "random-route", "probability": probability, "min": min, "max": max}
+    def random_route(probability: float, min: int, max: int) -> RuinMethod:
+        return RuinMethod({"type": "random-route", "probability": probability, "min": min, "max": max})
 
     @staticmethod
-    def close_route(probability: float) -> Dict[str, Any]:
-        return {"type": "close-route", "probability": probability}
+    def close_route(probability: float) -> RuinMethod:
+        return RuinMethod({"type": "close-route", "probability": probability})
 
     @staticmethod
-    def worst_route(probability: float) -> Dict[str, Any]:
-        return {"type": "worst-route", "probability": probability}
+    def worst_route(probability: float) -> RuinMethod:
+        return RuinMethod({"type": "worst-route", "probability": probability})
 
     @staticmethod
-    def worst_job(probability: float, min: int, max: int, skip: int = 0) -> Dict[str, Any]:
-        return {"type": "worst-job", "probability": probability, "min": min, "max": max, "skip": skip}
+    def worst_job(probability: float, min: int, max: int, skip: int = 0) -> RuinMethod:
+        return RuinMethod({"type": "worst-job", "probability": probability, "min": min, "max": max, "skip": skip})
 
     @staticmethod
-    def cluster(probability: float, min: int, max: int) -> Dict[str, Any]:
-        return {"type": "cluster", "probability": probability, "min": min, "max": max}
+    def cluster(probability: float, min: int, max: int) -> RuinMethod:
+        return RuinMethod({"type": "cluster", "probability": probability, "min": min, "max": max})
 
     @staticmethod
-    def group(methods: Sequence[Dict[str, Any]], *, weight: int = 1) -> Dict[str, Any]:
-        return {"methods": deepcopy(list(methods)), "weight": weight}
+    def group(methods: Sequence[RuinMethod], *, weight: int = 1) -> RuinMethod:
+        return RuinMethod({"methods": deepcopy(list(methods)), "weight": weight})
 
 
 class Hyper:
     """Factory helpers for hyper heuristic configuration."""
 
     @staticmethod
-    def dynamic_selective() -> Dict[str, Any]:
-        return {"type": "dynamic-selective"}
+    def dynamic_selective() -> HyperMethod:
+        return HyperMethod({"type": "dynamic-selective"})
 
     @staticmethod
-    def static_selective(operators: Optional[Sequence[Dict[str, Any]]] = None) -> Dict[str, Any]:
-        hyper = {"type": "static-selective"}
+    def static_selective(operators: Optional[Sequence[HyperMethod]] = None) -> HyperMethod:
+        hyper = HyperMethod({"type": "static-selective"})
         if operators is not None:
             hyper["operators"] = deepcopy(list(operators))
         return hyper
@@ -1246,37 +1270,37 @@ class Hyper:
         *,
         routes: Dict[str, int],
         repeat: int,
-        probability: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        return {"type": "decomposition", "routes": deepcopy(routes), "repeat": repeat, "probability": deepcopy(probability)}
+        probability: ProbabilityConfig,
+    ) -> HyperMethod:
+        return HyperMethod({"type": "decomposition", "routes": deepcopy(routes), "repeat": repeat, "probability": deepcopy(probability)})
 
     @staticmethod
     def local_search(
         *,
-        probability: Dict[str, Any],
+        probability: ProbabilityConfig,
         times: Dict[str, int],
-        operators: Sequence[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        return {
+        operators: Sequence[LocalOperatorType],
+    ) -> HyperMethod:
+        return HyperMethod({
             "type": "local-search",
             "probability": deepcopy(probability),
             "times": deepcopy(times),
             "operators": deepcopy(list(operators)),
-        }
+        })
 
     @staticmethod
     def ruin_recreate(
         *,
-        probability: Dict[str, Any],
-        ruins: Sequence[Dict[str, Any]],
-        recreates: Sequence[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        return {
+        probability: ProbabilityConfig,
+        ruins: Sequence[RuinMethod],
+        recreates: Sequence[RecreateMethod],
+    ) -> HyperMethod:
+        return HyperMethod({
             "type": "ruin-recreate",
             "probability": deepcopy(probability),
             "ruins": deepcopy(list(ruins)),
             "recreates": deepcopy(list(recreates)),
-        }
+        })
 
 
 def noise(probability: float, min: float, max: float) -> Dict[str, Any]:

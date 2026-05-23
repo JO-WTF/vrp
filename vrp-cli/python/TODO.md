@@ -89,17 +89,17 @@ Python facade has a documented API and at least one test or example covering it.
 - [x] Ruin method helpers
 - [x] Probability helpers
 - [x] Config presets for common solve modes
-- [ ] Full typed model for `evolution.initial.alternatives`
-- [ ] Full typed model for `hyper.static-selective.operators`
+- [x] Full typed model for `evolution.initial.alternatives`
+- [x] Full typed model for `hyper.static-selective.operators`
 - [x] Parameter validation for recreate/population/hyper helpers
 - [x] Config merge/overlay helper
-- [ ] Config export/import examples for full config
+- [x] Config export/import examples for full config
 
 ## Solution And Initial Solution
 
 - [x] Read/write solution JSON asset
 - [x] Pass initial solution JSON to native binding
-- [ ] Strong typed solution model
+- [x] Strong typed solution model
 - [x] Route/tour accessor helpers
 - [x] Stop/activity accessor helpers
 - [x] Unassigned jobs accessor helpers
@@ -118,10 +118,10 @@ Python facade has a documented API and at least one test or example covering it.
 - [x] README usage guide
 - [x] Objectives example
 - [x] Relations example
-- [ ] Break/reload/recharge example
-- [ ] Time-dependent matrix example
-- [ ] Location index example
-- [ ] Multi-profile matrix example
+- [x] Break/reload/recharge example
+- [x] Time-dependent matrix example
+- [x] Location index example
+- [x] Multi-profile matrix example
 - [x] Solution inspection example
 
 ## Tests
@@ -136,14 +136,14 @@ Python facade has a documented API and at least one test or example covering it.
 - [x] Relation helper tests
 - [x] Vehicle advanced helper tests
 - [x] Routing matrix validation tests
-- [ ] Initial solution builder tests
-- [ ] Native `vrp_cli` integration tests
+- [x] Initial solution builder tests
+- [x] Native `vrp_cli` integration tests
 
 ## Packaging
 
 - [x] Decide final Python package layout
 - [x] Move facade out of `examples` when package layout is decided
-- [ ] Add build instructions for PyO3/maturin or project-specific flow
-- [ ] Add API reference docs
-- [ ] Add CI step for Python facade tests
-- [ ] Add CI step for `cargo check --features py_bindings`
+- [x] Add build instructions for PyO3/maturin or project-specific flow
+- [x] Add API reference docs
+- [x] Add CI step for Python facade tests
+- [x] Add CI step for `cargo check --features py_bindings`
