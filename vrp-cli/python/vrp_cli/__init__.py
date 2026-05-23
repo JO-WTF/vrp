@@ -828,8 +828,58 @@ class Config(JsonAsset):
         return cls(data)
 
     @classmethod
-    def defaults(cls, *, max_time: int = 300, max_generations: int = 3000) -> "Config":
-        return cls(max_time=max_time, max_generations=max_generations)
+    def defaults(
+        cls,
+        max_time: Optional[int] = None,
+        max_generations: Optional[int] = None,
+        variation: Optional[int] = None,
+    ) -> "Config":
+        """Create a default configuration with optional termination limits."""
+        data: Dict[str, Any] = {}
+        if max_time is not None or max_generations is not None or variation is not None:
+            term: Dict[str, Any] = {}
+            if max_time is not None:
+                term["maxTime"] = max_time
+            if max_generations is not None:
+                term["maxGenerations"] = max_generations
+            if variation is not None:
+                term["variation"] = {"intervalType": "sample", "amount": variation, "tolerance": 0.1}
+            data["termination"] = term
+        return cls(data)
+
+    @classmethod
+    def fast(cls) -> "Config":
+        """Create a configuration optimized for fast heuristic execution.
+        
+        Uses greedy population and limits max generations to a small number.
+        """
+        return cls.defaults(max_generations=100).set_population_greedy(selection_size=2)
+
+    @classmethod
+    def deep(cls) -> "Config":
+        """Create a configuration optimized for deep, high-quality search.
+        
+        Uses the rosomaxa population and allows more generations.
+        """
+        return cls.defaults(max_generations=3000).set_population_rosomaxa()
+
+    @classmethod
+    def large_scale(cls) -> "Config":
+        """Create a configuration optimized for large scale problems."""
+        return cls.defaults(max_generations=500).set_population_rosomaxa().set_hyper_static()
+
+    def merge(self, other: "Config") -> "Config":
+        """Merge another Config into this one, overwriting existing fields."""
+        def dict_merge(dct: Dict[str, Any], merge_dct: Dict[str, Any]) -> None:
+            for k, v in merge_dct.items():
+                if k in dct and isinstance(dct[k], dict) and isinstance(v, dict):
+                    dict_merge(dct[k], v)
+                else:
+                    from copy import deepcopy
+                    dct[k] = deepcopy(v)
+
+        dict_merge(self._data, other.to_dict())
+        return self
 
     def set_termination(
         self,

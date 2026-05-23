@@ -88,11 +88,11 @@ Python facade has a documented API and at least one test or example covering it.
 - [x] Local operator helpers
 - [x] Ruin method helpers
 - [x] Probability helpers
-- [ ] Config presets for common solve modes
+- [x] Config presets for common solve modes
 - [ ] Full typed model for `evolution.initial.alternatives`
 - [ ] Full typed model for `hyper.static-selective.operators`
-- [ ] Parameter validation for recreate/population/hyper helpers
-- [ ] Config merge/overlay helper
+- [x] Parameter validation for recreate/population/hyper helpers
+- [x] Config merge/overlay helper
 - [ ] Config export/import examples for full config
 
 ## Solution And Initial Solution
@@ -105,7 +105,7 @@ Python facade has a documented API and at least one test or example covering it.
 - [x] Unassigned jobs accessor helpers
 - [x] Initial solution route builder
 - [x] Initial solution unassigned helper
-- [ ] Solution to geojson helper
+- [x] Solution to geojson helper
 - [x] Solution summary/statistics helper
 
 ## Examples

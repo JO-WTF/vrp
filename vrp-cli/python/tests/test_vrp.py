@@ -717,6 +717,30 @@ class ConfigBuilderTest(unittest.TestCase):
         self.assertEqual(data["telemetry"]["progress"]["logBest"], 10)
         self.assertTrue(data["output"]["includeGeojson"])
 
+    def test_config_presets(self):
+        fast_config = Config.fast().to_dict()
+        self.assertEqual(fast_config["termination"]["maxGenerations"], 100)
+        self.assertEqual(fast_config["evolution"]["population"]["type"], "greedy")
+
+        deep_config = Config.deep().to_dict()
+        self.assertEqual(deep_config["termination"]["maxGenerations"], 3000)
+        self.assertEqual(deep_config["evolution"]["population"]["type"], "rosomaxa")
+
+        large_config = Config.large_scale().to_dict()
+        self.assertEqual(large_config["termination"]["maxGenerations"], 500)
+        self.assertEqual(large_config["hyper"]["type"], "static-selective")
+
+    def test_config_merge(self):
+        base = Config.fast().set_parallelism((2, 1))
+        override = Config.defaults(max_time=50).set_parallelism((4, 2))
+        
+        base.merge(override)
+        data = base.to_dict()
+        
+        self.assertEqual(data["termination"]["maxGenerations"], 100)  # From base
+        self.assertEqual(data["termination"]["maxTime"], 50)          # From override
+        self.assertEqual(data["environment"]["parallelism"]["numThreadPools"], 4) # Overridden
+
     def test_config_validation(self):
         with self.assertRaises(ValueError):
             Config(max_generations=-1).validate()
