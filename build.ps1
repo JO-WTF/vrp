@@ -92,10 +92,10 @@ if (-not $NoPython) {
     Write-Host "Step 3: Building Python wheel with maturin..." -ForegroundColor Green
     try {
         # Check if maturin is available
-        $MaturinCheck = & $VenvPython -c "import maturin; print('OK')" 2>&1
+        & $VenvPython -m maturin --version 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) {
             Write-Host "  Installing maturin..." -ForegroundColor Cyan
-            & $VenvPython -m pip install "maturin>=0.14,<0.15" -q
+            & $VenvPython -m pip install "maturin>=1.0" -q
         }
         
         Push-Location (Join-Path $RootDir "vrp-cli")

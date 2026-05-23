@@ -158,7 +158,6 @@ class RealProblemVariantsTest(unittest.TestCase):
         self.assertGreater(len(solution.tours), 0)
 
 
-@unittest.skipUnless(native_vrp_cli_available(), "native vrp_cli module is not installed")
 class SolutionAccessorTest(unittest.TestCase):
     """Test Solution object accessors."""
 
@@ -211,7 +210,6 @@ class SolutionAccessorTest(unittest.TestCase):
         self.assertEqual(solution.tours[0]["vehicleId"], "vehicle_1")
 
 
-@unittest.skipUnless(native_vrp_cli_available(), "native vrp_cli module is not installed")
 class ConfigPresetTest(unittest.TestCase):
     """Test Config presets and variations."""
 

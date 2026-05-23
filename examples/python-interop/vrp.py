@@ -612,7 +612,7 @@ class Ruin:
         return {"type": "worst-route", "probability": probability}
 
     @staticmethod
-    def worst_job(probability: float, min: int, max: int, skip: int) -> Dict[str, Any]:
+    def worst_job(probability: float, min: int, max: int, skip: int = 0) -> Dict[str, Any]:
         return {"type": "worst-job", "probability": probability, "min": min, "max": max, "skip": skip}
 
     @staticmethod
@@ -823,6 +823,10 @@ def _read_json(source: JsonInput) -> JsonData:
 
     if not isinstance(source, (str, Path)):
         return _to_jsonable(source)
+
+    # If it looks like a JSON literal, parse it directly (avoids false-positive path hits)
+    if isinstance(source, str) and source.lstrip()[:1] in ("{", "["):
+        return json.loads(source)
 
     path = Path(source)
     try:
