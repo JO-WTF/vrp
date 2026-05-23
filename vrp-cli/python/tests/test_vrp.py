@@ -372,6 +372,33 @@ class ProblemBuilderTest(unittest.TestCase):
         problem.add_delivery("d1", (1, 1), [1])
         problem.validate_problem()  # Should pass
 
+    def test_validate_matrices_profile(self):
+        problem = Problem.empty().add_vehicle("v", start_location=(0, 0), start_earliest="2024-01-01T00:00:00Z", capacity=[1], profile="car")
+        problem.add_delivery("d1", (1, 1), [1])
+        
+        matrix_ok = RoutingMatrix(profile="car", durations=[0, 1, 1, 0], distances=[0, 1, 1, 0])
+        matrix_bad = RoutingMatrix(profile="truck", durations=[0, 1, 1, 0], distances=[0, 1, 1, 0])
+
+        problem.validate_matrices([matrix_ok])  # Should pass
+        
+        with self.assertRaises(ValueError) as ctx:
+            problem.validate_matrices([matrix_bad])
+        self.assertIn("specifies profile 'truck'", str(ctx.exception))
+
+    def test_validate_matrices_dimensions(self):
+        problem = Problem.empty().add_vehicle("v", start_location=(0, 0), start_earliest="2024-01-01T00:00:00Z", capacity=[1], profile="car")
+        problem.add_delivery("d1", (1, 1), [1])
+        
+        # We have 2 locations: (0,0) and (1,1). Expected matrix size is 2x2 = 4.
+        matrix_ok = RoutingMatrix(profile="car", durations=[0, 1, 1, 0], distances=[0, 1, 1, 0])
+        matrix_bad_size = RoutingMatrix(profile="car", durations=[0, 1, 2, 3, 4], distances=[0, 1, 1, 0])
+
+        problem.validate_matrices([matrix_ok])  # Should pass
+        
+        with self.assertRaises(ValueError) as ctx:
+            problem.validate_matrices([matrix_bad_size])
+        self.assertIn("has 'travelTimes' of length 5", str(ctx.exception))
+
     def test_add_multiple_deliveries(self):
         problem = (
             Problem.empty()
@@ -689,6 +716,28 @@ class ConfigBuilderTest(unittest.TestCase):
         self.assertTrue(data["environment"]["isExperimental"])
         self.assertEqual(data["telemetry"]["progress"]["logBest"], 10)
         self.assertTrue(data["output"]["includeGeojson"])
+
+    def test_config_validation(self):
+        with self.assertRaises(ValueError):
+            Config(max_generations=-1).validate()
+            
+        with self.assertRaises(ValueError):
+            Config().set_population_elitism(max_size=0).validate()
+            
+        with self.assertRaises(ValueError):
+            Config().set_initial(Recreate.cheapest(weight=-5)).validate()
+            
+        with self.assertRaises(ValueError):
+            Config().set_hyper_static([
+                Hyper.local_search(
+                    probability=Probability.scalar(1.0),
+                    times=min_max(1, 1),
+                    operators=[LocalOperator.swap_star(weight=0)]
+                )
+            ]).validate()
+        
+        # Valid config shouldn't raise
+        Config(max_time=10, max_generations=10).validate()
 
 
 class RecreateRuinFactoriesTest(unittest.TestCase):

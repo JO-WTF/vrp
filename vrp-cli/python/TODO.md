@@ -62,8 +62,8 @@ Python facade has a documented API and at least one test or example covering it.
 - [x] Multiple matrices passed to `solve`
 - [x] Optional `timestamp` field for time-dependent matrices
 - [x] Matrix collection helper
-- [ ] Matrix profile consistency validation against `fleet.profiles`
-- [ ] Matrix dimension validation against routing locations
+- [x] Matrix profile consistency validation against `fleet.profiles`
+- [x] Matrix dimension validation against routing locations
 - [x] Time-dependent matrix helper for multiple timestamps per profile
 - [ ] Location list to external routing service workflow helper
 - [x] Matrix construction from 2D duration/distance arrays

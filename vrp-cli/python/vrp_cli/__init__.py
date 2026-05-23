@@ -502,6 +502,39 @@ class Problem(JsonAsset):
     def _profiles(self) -> List[Dict[str, Any]]:
         return self._data.setdefault("fleet", {}).setdefault("profiles", [])
 
+    def validate_matrices(self, matrices: Sequence["RoutingMatrix"]) -> None:
+        """Validate matrices against the problem's profiles and location dimensions."""
+        if not matrices:
+            return
+
+        defined_profiles = {p.get("name") for p in self._profiles() if "name" in p}
+        
+        expected_size = None
+        try:
+            locations = self.get_locations()
+            num_locations = len(locations)
+            expected_size = num_locations * num_locations
+        except Exception:
+            pass
+
+        for idx, matrix in enumerate(matrices):
+            m_dict = matrix.to_dict()
+            profile = m_dict.get("profile")
+            if profile and profile not in defined_profiles:
+                raise ValueError(
+                    f"Matrix at index {idx} specifies profile '{profile}', "
+                    f"but it is not defined in the problem. Defined profiles: {defined_profiles}"
+                )
+            
+            if expected_size is not None:
+                for field in ["travelTimes", "distances"]:
+                    data = m_dict.get(field)
+                    if data is not None and len(data) != expected_size:
+                        raise ValueError(
+                            f"Matrix at index {idx} has '{field}' of length {len(data)}, "
+                            f"but problem has {num_locations} unique locations (expected size {expected_size})"
+                        )
+
     def _find_job(self, job_id: str) -> Dict[str, Any]:
         for job in self._jobs():
             if job.get("id") == job_id:
@@ -599,6 +632,13 @@ class Objective:
 
 class RoutingLocations(JsonAsset):
     """Ordered unique locations used to request routing matrices."""
+
+    def __len__(self) -> int:
+        return len(self._data) if isinstance(self._data, list) else 0
+
+    def __iter__(self) -> Iterator[Dict[str, Any]]:
+        if isinstance(self._data, list):
+            yield from self._data
 
 
 class RoutingMatrix(JsonAsset):
@@ -933,6 +973,41 @@ class Config(JsonAsset):
 
     def set_hyper_static(self, operators: Optional[Sequence[Dict[str, Any]]] = None) -> "Config":
         return self.set_hyper(Hyper.static_selective(operators))
+
+    def validate(self) -> None:
+        """Validate config parameters before solving."""
+        term = self._data.get("termination", {})
+        if "maxTime" in term and term["maxTime"] <= 0:
+            raise ValueError("maxTime must be greater than 0")
+        if "maxGenerations" in term and term["maxGenerations"] <= 0:
+            raise ValueError("maxGenerations must be greater than 0")
+
+        evo = self._data.get("evolution", {})
+        pop = evo.get("population", {})
+        if pop.get("type") in ["elitism", "rosomaxa"]:
+            if pop.get("maxSize") is not None and pop["maxSize"] <= 0:
+                raise ValueError("population maxSize must be greater than 0")
+            if pop.get("selectionSize") is not None and pop["selectionSize"] <= 0:
+                raise ValueError("population selectionSize must be greater than 0")
+
+        # Initial methods
+        initial = evo.get("initial", {})
+        methods = []
+        if "method" in initial:
+            methods.append(initial["method"])
+        methods.extend(initial.get("alternatives", {}).get("methods", []))
+        for method in methods:
+            if method and "weight" in method and method["weight"] <= 0:
+                raise ValueError(f"Initial method weight must be > 0, got {method['weight']}")
+
+        # Hyper methods
+        hyper = self._data.get("hyper", {})
+        if hyper.get("type") in ("static-selective", "dynamic-selective"):
+            for op in hyper.get("operators", []):
+                if "operators" in op:
+                    for sub_op in op["operators"]:
+                        if "weight" in sub_op and sub_op["weight"] <= 0:
+                            raise ValueError(f"Hyper operator weight must be > 0, got {sub_op['weight']}")
 
 
 class Recreate:
@@ -1472,6 +1547,11 @@ def solve(
     matrix_assets = [_ensure_asset(matrix, RoutingMatrix) for matrix in matrices or []]
     config_asset = _ensure_asset(config or Config(max_generations=3000, max_time=300), Config)
     init_asset = _ensure_asset(initial_solution, InitialSolution) if initial_solution is not None else None
+
+    problem_asset.validate_problem()
+    config_asset.validate()
+    if matrix_assets:
+        problem_asset.validate_matrices(matrix_assets)
 
     problem_json = problem_asset.to_json()
     matrices_json = [matrix.to_json() for matrix in matrix_assets]
