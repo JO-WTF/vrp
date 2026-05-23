@@ -108,7 +108,13 @@ problem = prg.Problem(
             )
         ],
         profiles=[prg.RoutingProfile(name='normal_car')]
-    )
+    ),
+    # objective is optional. When omitted, solver uses default objective.
+    # to customize, pass a flat list of objectives in priority order.
+    objectives=[
+        prg.Objective(type="minimize-cost"),
+        prg.Objective(type="balance-activities"),
+    ]
 
 )
 

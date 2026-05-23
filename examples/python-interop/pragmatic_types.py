@@ -22,7 +22,8 @@ class RoutingMatrix:
 class Problem:
     plan: Plan
     fleet: Fleet
-    objectives: Optional[List[List[Objective]]] = None
+    # Pragmatic format expects objective as a flat list evaluated in declaration order.
+    objectives: Optional[List[Objective]] = None
 
 
 @dataclass

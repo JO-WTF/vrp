@@ -1,9 +1,8 @@
-# Contains semi-automatically generated non-complete model of config format.
-# Please refer to documentation to define a full model
+# Contains semi-automatically generated model of config format.
 
 from __future__ import annotations
 from pydantic.dataclasses import dataclass
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -24,7 +23,9 @@ Telemetry.__pydantic_model__.update_forward_refs()
 
 @dataclass
 class Config:
-    termination: Termination
+    evolution: Optional[Dict[str, Any]] = None
+    hyper: Optional[Dict[str, Any]] = None
+    termination: Optional[Termination] = None
     telemetry: Optional[Telemetry] = Telemetry(
         progress=Progress(
             enabled=True,
@@ -34,6 +35,7 @@ class Config:
         )
     )
     environment: Optional[Environment] = None
+    output: Optional[Output] = None
 
 
 @dataclass
@@ -53,10 +55,21 @@ Logging.__pydantic_model__.update_forward_refs()
 @dataclass
 class Environment:
     logging: Logging = Logging(enabled=True)
+    parallelism: Optional[int] = None
+    maxTime: Optional[int] = None
+    isProfiling: Optional[bool] = None
     isExperimental: Optional[bool] = None
+
+
+@dataclass
+class Output:
+    includeGeoJson: Optional[bool] = None
+    writer: Optional[Dict[str, Any]] = None
+    extras: Optional[List[str]] = None
 
 
 Config.__pydantic_model__.update_forward_refs()
 Telemetry.__pydantic_model__.update_forward_refs()
 Termination.__pydantic_model__.update_forward_refs()
 Environment.__pydantic_model__.update_forward_refs()
+Output.__pydantic_model__.update_forward_refs()
