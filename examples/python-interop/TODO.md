@@ -20,7 +20,7 @@ Python facade has a documented API and at least one test or example covering it.
 - [x] `solve(..., initial_solution=..., on_iteration=...)`
 - [x] `validate(problem, matrices)`
 - [x] `get_locations(problem)`
-- [ ] Convert other supported formats to pragmatic through Python facade
+- [x] Convert other supported formats to pragmatic through Python facade
 - [x] Expose solution feasibility/checker API
 - [ ] Expose geojson output as a first-class Python object/helper
 

@@ -1251,6 +1251,32 @@ def get_locations(problem: JsonInput) -> RoutingLocations:
     return _ensure_asset(problem, Problem).get_locations()
 
 
+def convert_to_pragmatic(input_format: str, inputs: Sequence[str]) -> Problem:
+    """Convert an external routing problem format into a pragmatic Problem.
+
+    Parameters
+    ----------
+    input_format:
+        The format identifier (e.g., "tsplib", "cvrp").
+    inputs:
+        A sequence of raw string contents representing the input files.
+
+    Returns
+    -------
+    Problem
+        The converted pragmatic problem.
+
+    Raises
+    ------
+    OSError
+        If the conversion fails.
+    """
+    import vrp_cli
+
+    raw = vrp_cli.convert_to_pragmatic(input_format, list(inputs))
+    return Problem.from_json(raw)
+
+
 def validate(problem: JsonInput, matrices: Optional[Iterable[JsonInput]] = None) -> None:
     import vrp_cli
 
