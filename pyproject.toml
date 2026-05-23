@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "vrp-cli",
+    "vrp_studio",
 ]
 
 [build-system]
@@ -18,7 +19,9 @@ build-backend = "uv_build"
 [tool.uv.workspace]
 members = [
     "vrp-cli",
+    "vrp-studio",
 ]
 
 [tool.uv.sources]
 vrp-cli = { workspace = true }
+vrp-studio = { workspace = true }

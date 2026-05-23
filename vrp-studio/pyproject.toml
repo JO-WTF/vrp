@@ -1,0 +1,18 @@
+[project]
+name = "vrp_studio"
+version = "0.1.0"
+description = "VRP Real-Time Visualization Studio"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.23.0",
+    "vrp-cli",
+]
+
+[project.scripts]
+vrp-studio = "vrp_studio.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
