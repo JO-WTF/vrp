@@ -1258,6 +1258,119 @@ def validate(problem: JsonInput, matrices: Optional[Iterable[JsonInput]] = None)
     matrix_assets = [_ensure_asset(matrix, RoutingMatrix) for matrix in matrices or []]
     vrp_cli.validate_pragmatic(problem_asset.to_json(), [matrix.to_json() for matrix in matrix_assets])
 
+class CheckResult:
+    """Result of a solution feasibility check.
+
+    Attributes
+    ----------
+    violations : List[str]
+        Human-readable descriptions of every constraint violation found in the
+        solution.  An empty list means the solution is fully feasible.
+
+    Examples
+    --------
+    ::
+
+        result = check(problem, solution, matrices)
+        if result.is_feasible:
+            print("Solution is valid!")
+        else:
+            for msg in result.violations:
+                print(f"  VIOLATION: {msg}")
+
+        # Or raise immediately on infeasibility:
+        result.raise_if_infeasible()
+    """
+
+    def __init__(self, violations: List[str]) -> None:
+        self.violations: List[str] = violations
+
+    @property
+    def is_feasible(self) -> bool:
+        """``True`` when no constraint violations were found."""
+        return len(self.violations) == 0
+
+    def raise_if_infeasible(self) -> None:
+        """Raise :class:`ValueError` if the solution has constraint violations.
+
+        The exception message contains all violation descriptions joined by
+        newlines so they are easy to read in tracebacks.
+        """
+        if not self.is_feasible:
+            detail = "\n".join(f"  - {v}" for v in self.violations)
+            raise ValueError(
+                f"Solution is infeasible ({len(self.violations)} violation(s)):\n{detail}"
+            )
+
+    def __bool__(self) -> bool:
+        return self.is_feasible
+
+    def __len__(self) -> int:
+        return len(self.violations)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.violations)
+
+    def __repr__(self) -> str:
+        if self.is_feasible:
+            return "CheckResult(feasible)"
+        return f"CheckResult(infeasible, violations={len(self.violations)})"
+
+    def __str__(self) -> str:
+        if self.is_feasible:
+            return "Solution is feasible."
+        lines = [f"Solution is infeasible ({len(self.violations)} violation(s)):"]
+        for v in self.violations:
+            lines.append(f"  - {v}")
+        return "\n".join(lines)
+
+
+def check(
+    problem: JsonInput,
+    solution: JsonInput,
+    matrices: Optional[Iterable[JsonInput]] = None,
+) -> CheckResult:
+    """Check that *solution* is feasible with respect to *problem* and *matrices*.
+
+    The checker verifies load capacity, time-window adherence, relation
+    constraints, break/reload assignments, routing consistency, and vehicle
+    limits.
+
+    Parameters
+    ----------
+    problem:
+        The VRP problem definition.
+    solution:
+        The solver output to verify.
+    matrices:
+        Optional routing matrices.
+
+    Returns
+    -------
+    CheckResult
+        Empty violations list means feasible.
+
+    Raises
+    ------
+    OSError
+        If *problem* or *solution* cannot be parsed.
+    """
+    import vrp_cli
+
+    problem_asset = _ensure_asset(problem, Problem)
+    solution_asset = _ensure_asset(solution, Solution)
+    matrix_assets = [_ensure_asset(m, RoutingMatrix) for m in matrices or []]
+
+    raw = vrp_cli.check_pragmatic_solution(
+        problem_asset.to_json(),
+        solution_asset.to_json(),
+        [m.to_json() for m in matrix_assets],
+    )
+    violations: List[str] = json.loads(raw)
+    return CheckResult(violations)
+
+
+
 
 def _ensure_asset(value: JsonInput, cls):
     if isinstance(value, cls):

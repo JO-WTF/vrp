@@ -345,8 +345,9 @@ mod py_interop {
     use pyo3::prelude::*;
     use std::io::BufReader;
     use std::sync::Mutex;
+    use vrp_pragmatic::checker::CheckerContext;
     use vrp_pragmatic::format::problem::{deserialize_matrix, deserialize_problem, Matrix};
-    use vrp_pragmatic::format::solution::read_init_solution;
+    use vrp_pragmatic::format::solution::{deserialize_solution, read_init_solution};
     use vrp_pragmatic::format::CoordIndex;
 
     // TODO avoid duplications between 3 interop approaches
@@ -402,6 +403,47 @@ mod py_interop {
             .and_then(|(problem, matrices)| validate_problem(&problem, &matrices))
             .map(|_| "[]".to_string())
             .map_err(|errs| PyOSError::new_err(errs.to_string()))
+    }
+
+    /// Checks feasibility of a pragmatic solution against the given problem and optional matrices.
+    ///
+    /// Returns a JSON array of violation messages. An empty array `[]` means the solution is
+    /// feasible. Raises `OSError` only if the inputs cannot be parsed at all.
+    #[pyfunction]
+    fn check_pragmatic_solution(problem: String, solution: String, matrices: Vec<String>) -> PyResult<String> {
+        let problem = deserialize_problem(BufReader::new(problem.as_bytes()))
+            .map_err(|err| PyOSError::new_err(format!("cannot parse problem: {err}")))?;
+
+        let solution = deserialize_solution(BufReader::new(solution.as_bytes()))
+            .map_err(|err| PyOSError::new_err(format!("cannot parse solution: {err}")))?;
+
+        let matrices: Option<Vec<Matrix>> = if matrices.is_empty() {
+            None
+        } else {
+            let parsed = matrices
+                .iter()
+                .map(|m| deserialize_matrix(BufReader::new(m.as_bytes())))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|err| PyOSError::new_err(format!("cannot parse matrix: {err}")))?;
+            Some(parsed)
+        };
+
+        let core_problem = Arc::new(
+            if matrices.is_none() {
+                problem.clone().read_pragmatic()
+            } else {
+                (problem.clone(), matrices.clone().unwrap()).read_pragmatic()
+            }
+            .map_err(|errs| PyOSError::new_err(format!("cannot build core problem: {errs}")))?,
+        );
+
+        match CheckerContext::new(core_problem, problem, matrices, solution).and_then(|ctx| ctx.check()) {
+            Ok(()) => Ok("[]".to_string()),
+            Err(violations) => {
+                let messages: Vec<String> = violations.into_iter().map(|e| e.to_string()).collect();
+                serde_json::to_string(&messages).map_err(|err| PyOSError::new_err(err.to_string()))
+            }
+        }
     }
 
     /// Validates and solves Vehicle Routing Problem, calling callback each `every` generations.
@@ -573,6 +615,7 @@ mod py_interop {
         m.add_function(wrap_pyfunction!(convert_to_pragmatic, m)?)?;
         m.add_function(wrap_pyfunction!(get_routing_locations, m)?)?;
         m.add_function(wrap_pyfunction!(validate_pragmatic, m)?)?;
+        m.add_function(wrap_pyfunction!(check_pragmatic_solution, m)?)?;
         m.add_function(wrap_pyfunction!(solve_pragmatic, m)?)?;
         m.add_function(wrap_pyfunction!(solve_pragmatic_with_init, m)?)?;
         m.add_function(wrap_pyfunction!(solve_pragmatic_with_callback, m)?)?;

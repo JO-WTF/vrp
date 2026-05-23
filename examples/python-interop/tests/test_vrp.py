@@ -870,5 +870,47 @@ class SolutionRichAccessorTest(unittest.TestCase):
         self.assertIn("location", d)
 
 
+class SolutionCheckerTest(unittest.TestCase):
+    """Test feasibility checker."""
+
+    def test_check_feasible_solution(self):
+        from vrp import check, solve
+
+        problem = Problem.empty().add_delivery("d1", (52.1, 13.1), [1]).add_vehicle(
+            "v1", start_location=(52.0, 13.0), capacity=[10], start_earliest="2020-01-01T08:00:00Z", end_latest="2020-01-01T20:00:00Z",
+            costs={"distance": 1, "time": 1}
+        )
+        solution = solve(problem)
+        result = check(problem, solution)
+        self.assertTrue(result.is_feasible)
+        self.assertTrue(bool(result))
+        self.assertEqual(len(result), 0)
+
+    def test_check_infeasible_solution(self):
+        from vrp import check, solve
+        import json
+
+        problem = Problem.empty().add_delivery("d1", (52.1, 13.1), [1]).add_vehicle(
+            "v1", start_location=(52.0, 13.0), capacity=[10], start_earliest="2020-01-01T08:00:00Z", end_latest="2020-01-01T20:00:00Z",
+            costs={"distance": 1, "time": 1}
+        )
+        solution = solve(problem)
+        
+        # Mutate the solution to be infeasible: clear all tours, but don't add to unassigned.
+        solution_dict = json.loads(solution.to_json())
+        solution_dict["tours"] = []
+        solution_mutated = Solution.from_dict(solution_dict)
+
+        result = check(problem, solution_mutated)
+        self.assertFalse(result.is_feasible)
+        self.assertFalse(bool(result))
+        self.assertGreater(len(result), 0)
+        self.assertIn("jobs", result.violations[0])
+
+        with self.assertRaises(ValueError) as ctx:
+            result.raise_if_infeasible()
+        self.assertIn("Solution is infeasible", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
