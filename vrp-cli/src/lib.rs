@@ -40,6 +40,7 @@ use std::io::{BufReader, BufWriter};
 use std::sync::Arc;
 use vrp_core::models::Problem as CoreProblem;
 use vrp_core::prelude::{GenericError, Solver};
+use vrp_core::solver::IterationCallback;
 use vrp_pragmatic::format::FormatError;
 use vrp_pragmatic::format::problem::{PragmaticProblem, Problem, serialize_problem};
 use vrp_pragmatic::format::solution::{PragmaticOutputType, write_pragmatic};
@@ -342,6 +343,7 @@ mod py_interop {
     use pyo3::exceptions::PyOSError;
     use pyo3::prelude::*;
     use std::io::BufReader;
+    use std::sync::Mutex;
     use vrp_pragmatic::format::CoordIndex;
     use vrp_pragmatic::format::problem::{deserialize_matrix, deserialize_problem};
 
@@ -405,11 +407,87 @@ mod py_interop {
             .map_err(|err| PyOSError::new_err(err.to_string()))
     }
 
+    /// Validates and solves Vehicle Routing Problem, calling callback each `every` generations.
+    #[pyfunction]
+    fn solve_pragmatic_with_callback(
+        problem: String,
+        matrices: Vec<String>,
+        config: String,
+        callback: Py<PyAny>,
+        every: usize,
+    ) -> PyResult<String> {
+        if every == 0 {
+            return Err(PyOSError::new_err("callback interval 'every' has to be greater than zero"));
+        }
+
+        // validate first
+        deserialize_problem(BufReader::new(problem.as_bytes()))
+            .and_then(|problem| {
+                matrices
+                    .iter()
+                    .map(|m| deserialize_matrix(BufReader::new(m.as_bytes())))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(|matrices| (problem, matrices))
+            })
+            .and_then(|(problem, matrices)| {
+                let matrices = if matrices.is_empty() { None } else { Some(&matrices) };
+                let coord_index = CoordIndex::new(&problem);
+
+                ValidationContext::new(&problem, matrices, &coord_index).validate()
+            })
+            .map_err(|errs| PyOSError::new_err(errs.to_string()))?;
+
+        let callback = Arc::new(Mutex::new(callback));
+        let callback_error = Arc::new(Mutex::new(None::<String>));
+
+        let iteration_callback = {
+            let callback = callback.clone();
+            let callback_error = callback_error.clone();
+
+            Arc::new(move |generation: usize, solution: String| {
+                if callback_error.lock().map(|err| err.is_some()).unwrap_or(true) {
+                    return;
+                }
+
+                let result = Python::with_gil(|py| {
+                    callback.lock().map_err(|err| err.to_string()).and_then(|callback| {
+                        callback.call1(py, (generation, solution)).map(|_| ()).map_err(|err| err.to_string())
+                    })
+                });
+
+                if let Err(err) = result {
+                    if let Ok(mut callback_error) = callback_error.lock() {
+                        *callback_error = Some(err);
+                    }
+                }
+            })
+        };
+
+        let result = if matrices.is_empty() { problem.read_pragmatic() } else { (problem, matrices).read_pragmatic() }
+            .map_err(From::from)
+            .and_then(|problem| {
+                read_config(BufReader::new(config.as_bytes()))
+                    .map_err(|err| GenericError::from(serialize_as_config_error(err.to_string().as_str())))
+                    .map(|config| (problem, config))
+            })
+            .and_then(|(problem, config)| {
+                get_solution_serialized_with_callback(Arc::new(problem), config, every, iteration_callback)
+            })
+            .map_err(|err| PyOSError::new_err(err.to_string()))?;
+
+        if let Some(err) = callback_error.lock().map_err(|err| PyOSError::new_err(err.to_string()))?.take() {
+            return Err(PyOSError::new_err(err));
+        }
+
+        Ok(result)
+    }
+
     #[pymodule]
     fn vrp_cli(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.add_function(wrap_pyfunction!(convert_to_pragmatic, m)?)?;
         m.add_function(wrap_pyfunction!(get_routing_locations, m)?)?;
         m.add_function(wrap_pyfunction!(solve_pragmatic, m)?)?;
+        m.add_function(wrap_pyfunction!(solve_pragmatic_with_callback, m)?)?;
         Ok(())
     }
 }
@@ -508,9 +586,34 @@ pub fn get_locations_serialized(problem: &Problem) -> Result<String, GenericErro
 
 /// Gets solution serialized in json.
 pub fn get_solution_serialized(problem: Arc<CoreProblem>, config: Config) -> Result<String, GenericError> {
-    let solution = create_builder_from_config(problem.clone(), Default::default(), &config)
-        .and_then(|builder| builder.build())
-        .map(|config| Solver::new(problem.clone(), config))
+    let solution = create_solver(problem.clone(), &config, None).and_then(|solver| solver.solve()).map_err(|err| {
+        FormatError::new(
+            "E0003".to_string(),
+            "cannot find any solution".to_string(),
+            format!("please submit a bug and share original problem and routing matrix. Error: '{err}'"),
+        )
+        .to_json()
+    })?;
+
+    serialize_solution(problem.as_ref(), &solution, is_geojson_included(&config))
+}
+
+/// Gets solution serialized in json with iteration callback.
+pub fn get_solution_serialized_with_callback(
+    problem: Arc<CoreProblem>,
+    config: Config,
+    every: usize,
+    callback: Arc<dyn Fn(usize, String) + Send + Sync>,
+) -> Result<String, GenericError> {
+    let include_geojson = is_geojson_included(&config);
+    let callback_problem = problem.clone();
+    let iteration_callback: IterationCallback = Arc::new(move |generation, solution| {
+        if let Ok(solution) = serialize_solution(callback_problem.as_ref(), &solution, include_geojson) {
+            callback(generation, solution);
+        }
+    });
+
+    let solution = create_solver(problem.clone(), &config, Some((every, iteration_callback)))
         .and_then(|solver| solver.solve())
         .map_err(|err| {
             FormatError::new(
@@ -521,14 +624,38 @@ pub fn get_solution_serialized(problem: Arc<CoreProblem>, config: Config) -> Res
             .to_json()
         })?;
 
-    let output_type = if config.output.and_then(|output_cfg| output_cfg.include_geojson).unwrap_or(false) {
-        PragmaticOutputType::Combined
-    } else {
-        Default::default()
-    };
+    serialize_solution(problem.as_ref(), &solution, include_geojson)
+}
+
+fn create_solver(
+    problem: Arc<CoreProblem>,
+    config: &Config,
+    iteration_callback: Option<(usize, IterationCallback)>,
+) -> Result<Solver, GenericError> {
+    create_builder_from_config(problem.clone(), Default::default(), config).and_then(|builder| builder.build()).map(
+        |mut config| {
+            if let Some((every, callback)) = iteration_callback {
+                config.context = config.context.with_iteration_callback(every, callback);
+            }
+
+            Solver::new(problem, config)
+        },
+    )
+}
+
+fn is_geojson_included(config: &Config) -> bool {
+    config.output.as_ref().and_then(|output_cfg| output_cfg.include_geojson).unwrap_or(false)
+}
+
+fn serialize_solution(
+    problem: &CoreProblem,
+    solution: &vrp_core::models::Solution,
+    include_geojson: bool,
+) -> Result<String, GenericError> {
+    let output_type = if include_geojson { PragmaticOutputType::Combined } else { Default::default() };
 
     let mut writer = BufWriter::new(Vec::new());
-    write_pragmatic(problem.as_ref(), &solution, output_type, &mut writer)?;
+    write_pragmatic(problem, solution, output_type, &mut writer)?;
 
     let bytes = writer.into_inner().map_err(|err| format!("{err}"))?;
     let result = String::from_utf8(bytes).map_err(|err| format!("{err}"))?;

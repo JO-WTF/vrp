@@ -113,10 +113,40 @@ problem = prg.Problem(
 )
 
 # run solver and deserialize result into solution model
-solution = prg.Solution(**json.loads(vrp_cli.solve_pragmatic(
-    problem=json.dumps(problem, default=pydantic_encoder),
-    matrices=[json.dumps(matrix, default=pydantic_encoder)],
-    config=json.dumps(config, default=pydantic_encoder),
-)))
+problem_json = json.dumps(problem, default=pydantic_encoder)
+matrix_json = json.dumps(matrix, default=pydantic_encoder)
+config_json = json.dumps(config, default=pydantic_encoder)
+
+
+def on_iteration(generation, solution_json):
+    solution = json.loads(solution_json)
+    statistic = solution["statistic"]
+    print(
+        "iteration callback:",
+        f"generation={generation}",
+        f"cost={statistic['cost']}",
+        f"routes={len(solution.get('tours', []))}",
+        f"unassigned={len(solution.get('unassigned', []))}",
+    )
+
+
+solve_with_callback = getattr(vrp_cli, "solve_pragmatic_with_callback", None)
+
+if solve_with_callback is not None:
+    solution_json = solve_with_callback(
+        problem=problem_json,
+        matrices=[matrix_json],
+        config=config_json,
+        callback=on_iteration,
+        every=100,
+    )
+else:
+    solution_json = vrp_cli.solve_pragmatic(
+        problem=problem_json,
+        matrices=[matrix_json],
+        config=config_json,
+    )
+
+solution = prg.Solution(**json.loads(solution_json))
 
 print(solution)

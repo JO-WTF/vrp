@@ -12,8 +12,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use vrp_cli::core::solver::TargetHeuristic;
 use vrp_cli::extensions::solve::config::create_builder_from_config_file;
 use vrp_cli::extensions::solve::formats::*;
+use vrp_core::construction::enablers::create_typed_actor_groups;
 use vrp_core::construction::heuristics::InsertionContext;
 use vrp_core::models::common::Footprint;
+use vrp_core::models::problem::VehicleIdDimension;
 use vrp_core::prelude::*;
 use vrp_core::rosomaxa::{evolution::*, get_default_population, get_default_selection_size};
 use vrp_core::solver::*;
@@ -39,6 +41,7 @@ const PARALLELISM_ARG_NAME: &str = "parallelism";
 const HEURISTIC_ARG_NAME: &str = "heuristic";
 const EXPERIMENTAL_ARG_NAME: &str = "experimental";
 const ROUNDED_ARG_NAME: &str = "round";
+const FIXED_COST_ARG_NAME: &str = "fixed-cost";
 
 pub fn get_solve_app() -> Command {
     Command::new("solve")
@@ -170,6 +173,14 @@ pub fn get_solve_app() -> Command {
                 .action(ArgAction::SetTrue)
         )
         .arg(
+            Arg::new(FIXED_COST_ARG_NAME)
+                .help("Overrides fixed vehicle cost for all vehicles")
+                .long(FIXED_COST_ARG_NAME)
+                .visible_alias("fixed_cost")
+                .value_parser(clap::value_parser!(Float))
+                .required(false)
+        )
+        .arg(
             Arg::new(ROUNDED_ARG_NAME)
                 .help("Specifies whether costs are rounded. Applicable only for scientific formats.")
                 .long(ROUNDED_ARG_NAME)
@@ -221,7 +232,7 @@ pub fn run_solve(
             } else {
                 match problem_reader(problem_file, matrix_files) {
                     Ok(problem) => {
-                        let problem = Arc::new(problem);
+                        let problem = Arc::new(apply_fixed_cost(problem, matches)?);
 
                         let init_solutions = read_init_solutions_if_necessary(
                             problem.clone(),
@@ -459,4 +470,35 @@ pub fn create_interruption_quota(max_time: Option<usize>) -> Arc<dyn Quota> {
     });
 
     Arc::new(InterruptionQuota { inner, should_interrupt })
+}
+
+fn apply_fixed_cost(problem: Problem, matches: &ArgMatches) -> GenericResult<Problem> {
+    let Some(&fixed) = matches.get_one::<Float>(FIXED_COST_ARG_NAME) else {
+        return Ok(problem);
+    };
+
+    let vehicles = problem
+        .fleet
+        .vehicles
+        .iter()
+        .map(|vehicle| {
+            let mut vehicle = (**vehicle).clone();
+            vehicle.costs.fixed = fixed;
+            Arc::new(vehicle)
+        })
+        .collect();
+
+    let fleet = Arc::new(Fleet::new(problem.fleet.drivers.clone(), vehicles, |actors| {
+        create_typed_actor_groups(actors, |a| a.vehicle.dimens.get_vehicle_id().cloned().unwrap_or_default())
+    }));
+
+    Ok(Problem {
+        fleet,
+        jobs: problem.jobs,
+        locks: problem.locks,
+        goal: problem.goal,
+        activity: problem.activity,
+        transport: problem.transport,
+        extras: problem.extras,
+    })
 }
