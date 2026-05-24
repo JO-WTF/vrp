@@ -568,7 +568,7 @@ const updateMapboxData = () => {
     const color = colors[index % colors.length]
     const coords: [number, number][] = []
     
-    tour.stops?.forEach((stop: any) => {
+    tour.stops?.forEach((stop: any, stopIndex: number) => {
       const act = stop.activities?.[0]
       const isGeo = stop.location?.lng !== undefined && stop.location?.lat !== undefined
       if (isGeo) {
@@ -580,17 +580,87 @@ const updateMapboxData = () => {
         maxLng = Math.max(maxLng, lng)
         minLat = Math.min(minLat, lat)
         maxLat = Math.max(maxLat, lat)
+
+        const jobId = act?.jobId ?? ''
+        const pointLabel = jobId || act?.type || `Stop ${stopIndex + 1}`
+
+        const fmtLoad = (load: unknown): string => {
+          if (Array.isArray(load)) return load.length ? load.join(', ') : 'N/A'
+          return load === undefined || load === null ? 'N/A' : String(load)
+        }
+
+        const actualSvcSecs = (() => {
+          const arr = Date.parse(stop.time?.arrival)
+          const dep = Date.parse(stop.time?.departure)
+          if (!stop?.time?.arrival || !stop?.time?.departure || isNaN(arr) || isNaN(dep)) return null
+          return Math.round((dep - arr) / 1000)
+        })()
+
+        const jm = jobsMeta.value[jobId]
+        const place0 = jm?.places?.[0]
+        const plannedSvcSecs: number | undefined = place0?.duration
+        const timeWindows: any[][] | undefined = place0?.times
+        const twStr = timeWindows?.length
+          ? timeWindows.map((tw: any[]) => `${tw[0]} – ${tw[1]}`).join(', ')
+          : undefined
+          
+        const skillsObj = jm?.skills
+        let skillsStr = '—'
+        if (skillsObj) {
+           const parts = []
+           if (skillsObj.allOf?.length) parts.push(`All: ${skillsObj.allOf.join(', ')}`)
+           if (skillsObj.anyOf?.length) parts.push(`Any: ${skillsObj.anyOf.join(', ')}`)
+           if (skillsObj.noneOf?.length) parts.push(`None: ${skillsObj.noneOf.join(', ')}`)
+           if (parts.length) skillsStr = parts.join(' | ')
+        }
+        
+        // Fixed colors by stop type (overrides vehicle color)  
+        const typeColorMap: Record<string, string> = {
+          departure: '#f8fafc',
+          arrival: '#f8fafc',
+          depot: '#f8fafc',
+          pickup: '#34d399',
+          delivery: '#38bdf8',
+          recharge: '#facc15',
+          break: '#fb923c',
+          service: color,
+          stop: color,
+        }
+        const typeEmojiMap: Record<string, string> = {
+          departure: '⬛',
+          arrival: '⬛',
+          depot: '⬛',
+          pickup: '▲',
+          delivery: '▼',
+          recharge: '◆',
+          break: '◼',
+          service: '▼',
+          stop: '▪',
+        }
+        const actType = act?.type || 'stop'
+        const typeColor = typeColorMap[actType] ?? color
+        const typeEmoji = typeEmojiMap[actType] ?? '●'
         
         pointFeatures.push({
           type: 'Feature',
           geometry: { type: 'Point', coordinates: [lng, lat] },
           properties: {
-            color: color,
-            id: act?.jobId || 'depot',
-            type: act?.type || 'stop',
-            arrival: stop.time?.arrival || '',
+            color: typeColor,
+            vehicleColor: color,
+            emoji: typeEmoji,
+            id: jobId,
+            pointLabel: pointLabel,
+            type: actType,
+            arrival: stop.time?.arrival || 'N/A',
+            departure: stop.time?.departure || 'N/A',
             vehicleId: tour.vehicleId,
-            radius: (act?.type === 'departure' || act?.type === 'arrival' || act?.type === 'depot') ? 8 : 5
+            actualSvc: actualSvcSecs !== null ? fmtSecs(actualSvcSecs) : 'N/A',
+            plannedSvc: plannedSvcSecs !== undefined ? fmtSecs(plannedSvcSecs) : '—',
+            timeWindows: twStr ?? '—',
+            distance: stop.distance ?? 'N/A',
+            load: fmtLoad(stop.load),
+            skills: skillsStr,
+            radius: (actType === 'departure' || actType === 'arrival' || actType === 'depot') ? 9 : 6
           }
         })
       }
@@ -600,7 +670,12 @@ const updateMapboxData = () => {
       lineFeatures.push({
         type: 'Feature',
         geometry: { type: 'LineString', coordinates: coords },
-        properties: { color: color, vehicleId: tour.vehicleId }
+        properties: { 
+            color: color, 
+            vehicleId: tour.vehicleId,
+            distance: tour.statistic?.distance ?? 'N/A',
+            duration: tour.statistic?.duration != null ? fmtSecs(tour.statistic.duration) : 'N/A'
+        }
       })
     }
   })
@@ -615,14 +690,41 @@ const updateMapboxData = () => {
       minLat = Math.min(minLat, lat)
       maxLat = Math.max(maxLat, lat)
       
+      const actType = item.actType || 'unassigned'
+      const typeColorMap: Record<string, string> = {
+        pickup: '#34d399',
+        delivery: '#38bdf8',
+        service: '#a78bfa',
+        replacement: '#a78bfa',
+        unassigned: '#94a3b8',
+      }
+      const typeEmojiMap: Record<string, string> = {
+        pickup: '▲',
+        delivery: '▼',
+        service: '▼',
+        replacement: '◆',
+        unassigned: '✕',
+      }
       unassignedFeatures.push({
         type: 'Feature',
         geometry: { type: 'Point', coordinates: [lng, lat] },
         properties: {
-            color: '#94a3b8',
+            color: typeColorMap[actType] ?? '#94a3b8',
+            vehicleColor: '#475569',
+            emoji: typeEmojiMap[actType] ?? '✕',
             id: item.jobId || 'Unassigned',
-            type: 'unassigned',
-            radius: 5
+            pointLabel: item.jobId || 'Unassigned',
+            type: actType,
+            arrival: 'N/A',
+            departure: 'N/A',
+            vehicleId: '',
+            actualSvc: 'N/A',
+            plannedSvc: 'N/A',
+            timeWindows: '—',
+            distance: 'N/A',
+            load: 'N/A',
+            skills: '—',
+            radius: 6
         }
       })
     }
@@ -639,6 +741,7 @@ const updateMapboxData = () => {
     })
     
     map.addSource('vrp-points', { type: 'geojson', data: { type: 'FeatureCollection', features: [...pointFeatures, ...unassignedFeatures] } })
+    // Base circle layer — colored by type
     map.addLayer({
       id: 'vrp-points-layer',
       type: 'circle',
@@ -646,8 +749,25 @@ const updateMapboxData = () => {
       paint: {
         'circle-radius': ['get', 'radius'],
         'circle-color': ['get', 'color'],
-        'circle-stroke-width': 1,
-        'circle-stroke-color': '#fff'
+        'circle-stroke-width': 2,
+        'circle-stroke-color': ['get', 'vehicleColor']
+      }
+    })
+    // Emoji symbol layer on top for shape distinction
+    map.addLayer({
+      id: 'vrp-labels-layer',
+      type: 'symbol',
+      source: 'vrp-points',
+      layout: {
+        'text-field': ['get', 'emoji'],
+        'text-size': 14,
+        'text-allow-overlap': true,
+        'text-ignore-placement': true
+      },
+      paint: {
+        'text-color': '#0f172a',
+        'text-halo-color': 'rgba(0,0,0,0)',
+        'text-halo-width': 0
       }
     })
     
@@ -655,10 +775,73 @@ const updateMapboxData = () => {
     map.on('mouseenter', 'vrp-points-layer', (e: any) => {
         map.getCanvas().style.cursor = 'pointer'
         const p = e.features[0].properties
-        const html = `<b>${p.vehicleId || 'N/A'}</b><br/>Type: ${p.type}<br/>ID: ${p.id}<br/>Arr: ${p.arrival || 'N/A'}`
-        popup.setLngLat(e.features[0].geometry.coordinates).setHTML(html).addTo(map)
+        if (p.type === 'unassigned') {
+            popup.setLngLat(e.features[0].geometry.coordinates).setHTML(`<b>Unassigned</b><br/>Job: ${p.id}<br/>Type: ${p.type}`).addTo(map)
+        } else {
+            const html = [
+                `<b>${p.vehicleId || 'N/A'}</b> · ${p.pointLabel}`,
+                `Type: ${p.type}`,
+                `Lat/Lng: ${fmtCoord(e.features[0].geometry.coordinates[1])}, ${fmtCoord(e.features[0].geometry.coordinates[0])}`,
+                `Arrival: ${p.arrival}`,
+                `Departure: ${p.departure}`,
+                `Actual service: ${p.actualSvc}`,
+                `Planned service: ${p.plannedSvc}`,
+                `Time window: ${p.timeWindows}`,
+                `Skills: ${p.skills}`,
+                `Distance: ${p.distance}`,
+                `Load: ${p.load}`
+            ].join('<br/>')
+            popup.setLngLat(e.features[0].geometry.coordinates).setHTML(html).addTo(map)
+        }
     })
     map.on('mouseleave', 'vrp-points-layer', () => {
+        map.getCanvas().style.cursor = ''
+        popup.remove()
+    })
+
+    // Mirror hover on the emoji symbol layer (it sits on top of the circles)
+    const showPointPopup = (e: any) => {
+        map.getCanvas().style.cursor = 'pointer'
+        const p = e.features[0].properties
+        if (p.type === 'unassigned') {
+            popup.setLngLat(e.lngLat).setHTML(`<b>Unassigned</b><br/>Job: ${p.id}<br/>Type: ${p.type}`).addTo(map)
+        } else {
+            const html = [
+                `<b>${p.vehicleId || 'N/A'}</b> · ${p.pointLabel}`,
+                `Type: ${p.type}`,
+                `Lat/Lng: ${fmtCoord(e.lngLat.lat)}, ${fmtCoord(e.lngLat.lng)}`,
+                `Arrival: ${p.arrival}`,
+                `Departure: ${p.departure}`,
+                `Actual service: ${p.actualSvc}`,
+                `Planned service: ${p.plannedSvc}`,
+                `Time window: ${p.timeWindows}`,
+                `Skills: ${p.skills}`,
+                `Distance: ${p.distance}`,
+                `Load: ${p.load}`
+            ].join('<br/>')
+            popup.setLngLat(e.lngLat).setHTML(html).addTo(map)
+        }
+    }
+    map.on('mouseenter', 'vrp-labels-layer', showPointPopup)
+    map.on('mouseleave', 'vrp-labels-layer', () => {
+        map.getCanvas().style.cursor = ''
+        popup.remove()
+    })
+
+    map.on('mouseenter', 'vrp-lines-layer', (e: any) => {
+        map.getCanvas().style.cursor = 'pointer'
+        const p = e.features[0].properties
+        const html = [
+            `<b>${p.vehicleId}</b>`,
+            `Distance: ${p.distance}`,
+            `Duration: ${p.duration}`
+        ].join('<br/>')
+        popup.setLngLat(e.lngLat).setHTML(html).addTo(map)
+    })
+    map.on('mousemove', 'vrp-lines-layer', (e: any) => {
+        popup.setLngLat(e.lngLat)
+    })
+    map.on('mouseleave', 'vrp-lines-layer', () => {
         map.getCanvas().style.cursor = ''
         popup.remove()
     })

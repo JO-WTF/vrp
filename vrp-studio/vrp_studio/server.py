@@ -90,32 +90,66 @@ async def get_initial_state(req: ProblemRequest):
         from vrp_cli.vis.tracker import _extract_jobs_meta
         jobs_meta = _extract_jobs_meta(problem)
 
+        # Extract every individual place from every job's pickups, deliveries, services, replacements
         unassigned = []
-        for job_id, meta in jobs_meta.items():
-            if meta.get("places"):
-                loc = meta["places"][0].get("location")
-                if loc:
-                    unassigned.append({
-                        "jobId": job_id,
-                        "location": loc
-                    })
+        for job in d.get("plan", {}).get("jobs", []):
+            job_id = job.get("id", "unknown")
+            for act_type in ("pickups", "deliveries", "services", "replacements"):
+                for act in job.get(act_type, []):
+                    for place in act.get("places", []):
+                        loc = place.get("location")
+                        if loc:
+                            tag = place.get("tag", "")
+                            label = f"{job_id}{'/' + tag if tag else ''}"
+                            unassigned.append({
+                                "jobId": label,
+                                "location": loc,
+                                "actType": {"pickups": "pickup", "deliveries": "delivery", "services": "service", "replacements": "replacement"}.get(act_type, act_type)
+                            })
         
         tours = []
         for vehicle in d.get("fleet", {}).get("vehicles", []):
             vehicle_ids = vehicle.get("vehicleIds", ["v"])
             for vid in vehicle_ids:
                 for shift in vehicle.get("shifts", []):
+                    stops = []
                     start_loc = shift.get("start", {}).get("location")
                     if start_loc:
-                        tours.append({
-                            "vehicleId": vid,
-                            "stops": [
-                                {
-                                    "location": start_loc,
-                                    "activities": [{"type": "depot"}]
-                                }
-                            ]
+                        stops.append({
+                            "location": start_loc,
+                            "activities": [{"type": "depot"}]
                         })
+
+                    # Extract breaks with a fixed location
+                    for brk in shift.get("breaks", []):
+                        for place in brk.get("places", []):
+                            loc = place.get("location")
+                            if loc:
+                                stops.append({
+                                    "location": loc,
+                                    "activities": [{"type": "break"}]
+                                })
+
+                    # Extract recharge stations
+                    for station in shift.get("recharges", {}).get("stations", []):
+                        loc = station.get("location")
+                        if loc:
+                            stops.append({
+                                "location": loc,
+                                "activities": [{"type": "recharge"}]
+                            })
+
+                    # Extract reload points
+                    for reload in shift.get("reloadPoints", []):
+                        loc = reload.get("location")
+                        if loc:
+                            stops.append({
+                                "location": loc,
+                                "activities": [{"type": "service"}]
+                            })
+
+                    if stops:
+                        tours.append({"vehicleId": vid, "stops": stops})
 
         return JSONResponse({
             "jobs_meta": jobs_meta,

@@ -15,15 +15,16 @@ body {
 }
 
 .mapboxgl-popup-content {
-  background: rgba(15, 23, 42, 0.9);
-  color: #fff;
-  border-radius: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.3);
-  padding: 10px;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.5);
-  font-family: inherit;
+  background: rgba(15, 23, 42, 0.9) !important;
+  color: #fff !important;
+  border-radius: 8px !important;
+  border: 1px solid rgba(148, 163, 184, 0.3) !important;
+  padding: 10px !important;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.5) !important;
+  font-family: inherit !important;
 }
 
 .mapboxgl-popup-tip {
-  border-top-color: rgba(15, 23, 42, 0.9);
+  border-top-color: rgba(15, 23, 42, 0.9) !important;
+  border-bottom-color: rgba(15, 23, 42, 0.9) !important;
 }
