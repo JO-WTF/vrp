@@ -1,18 +1,32 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, h, watch } from 'vue'
-import { use } from 'echarts/core'
-import { CanvasRenderer } from 'echarts/renderers'
-import { LineChart, ScatterChart, LinesChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent, TitleComponent, LegendComponent, DataZoomComponent } from 'echarts/components'
+import { computed, onMounted, ref, h, watch, nextTick } from 'vue'
+import * as echarts from 'echarts'
 import VChart from 'vue-echarts'
-import { PlayCircleOutlined, StopOutlined, DollarOutlined, EnvironmentOutlined, FieldTimeOutlined, CarOutlined, DashboardOutlined, InboxOutlined, HourglassOutlined, CoffeeOutlined, StepBackwardOutlined, StepForwardOutlined } from '@ant-design/icons-vue'
+import { PlayCircleOutlined, StopOutlined, DollarOutlined, EnvironmentOutlined, FieldTimeOutlined, CarOutlined, DashboardOutlined, InboxOutlined, HourglassOutlined, CoffeeOutlined, StepBackwardOutlined, StepForwardOutlined, UploadOutlined, BookOutlined, UserOutlined } from '@ant-design/icons-vue'
 import { theme, message } from 'ant-design-vue'
-use([CanvasRenderer, LineChart, ScatterChart, LinesChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, DataZoomComponent])
+import 'mapbox-gl/dist/mapbox-gl.css'
+import mapboxgl from 'mapbox-gl'
+
+const mapContainer = ref<HTMLElement | null>(null)
+const mapboxContainer = ref<HTMLElement | null>(null)
+let mainMapChart: any = null
+let mapboxMapInstance: mapboxgl.Map | null = null
+const isGeoMode = ref(false)
+let currentProblemFitted = false
 
 const problems = ref<any[]>([])
 const selectedProblem = ref<string | null>(null)
 const maxTime = ref<number>(60)
 const maxGen = ref<number>(3000)
+const mapboxToken = ref(localStorage.getItem('mapboxToken') || '')
+
+watch(mapboxToken, (newVal) => {
+  if (newVal) {
+    localStorage.setItem('mapboxToken', newVal)
+  } else {
+    localStorage.removeItem('mapboxToken')
+  }
+})
 
 const runData = ref<any>({ history: [] })
 const loading = ref(false)
@@ -106,12 +120,14 @@ const stopSolver = () => {
   if (timerInterval) clearInterval(timerInterval)
 }
 
-const fetchInitialState = async (path: string) => {
+const fetchInitialState = async (path?: string) => {
+  const targetPath = path || selectedProblem.value
+  if (!targetPath) return
   try {
     const res = await fetch('/api/problem/initial_state', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ problem_path: path })
+      body: JSON.stringify({ problem_path: targetPath })
     })
     const data = await res.json()
     if (data.initial_state) {
@@ -132,10 +148,25 @@ const fetchInitialState = async (path: string) => {
 }
 
 watch(selectedProblem, (newVal) => {
+  currentProblemFitted = false
   if (newVal && !running.value) {
     fetchInitialState(newVal)
   }
 })
+
+const handleUploadChange = (info: any) => {
+  if (info.file.status === 'done') {
+    message.success(`${info.file.name} file uploaded successfully`)
+    fetchProblems().then(() => {
+      if (info.file.response && info.file.response.problem_path) {
+        selectedProblem.value = info.file.response.problem_path
+        fetchInitialState()
+      }
+    })
+  } else if (info.file.status === 'error') {
+    message.error(`${info.file.name} file upload failed: ${info.file.response?.error || 'Unknown error'}`)
+  }
+}
 
 const jumpToPreviousSolution = () => {
   if (!runData.value?.history?.length) return
@@ -161,10 +192,8 @@ const latestBest = computed(() => {
   return [...validHistory].sort((a: any, b: any) => a.cost - b.cost)[0]
 })
 
-// Per-job metadata (time windows, service duration, demand) from the JSON
 const jobsMeta = computed<Record<string, any>>(() => runData.value?.jobs_meta ?? {})
 
-// Helper: format seconds as "Xh Ym Zs" or "Xm Zs"
 const fmtSecs = (s: number | undefined | null): string => {
   if (s === undefined || s === null || Number.isNaN(s)) return 'N/A'
   const h = Math.floor(s / 3600)
@@ -177,9 +206,6 @@ const fmtSecs = (s: number | undefined | null): string => {
 
 const fmtCoord = (v: number | undefined | null): string =>
   v === undefined || v === null || Number.isNaN(v) ? 'N/A' : Number(v).toFixed(5)
-
-
-
 
 const colors = ['#8b5cf6', '#38bdf8', '#34d399', '#f59e0b', '#f472b6', '#22d3ee', '#fb7185', '#a78bfa']
 
@@ -283,200 +309,383 @@ const mapChartOption = computed(() => {
   const series: any[] = []
   let hasValidCoords = false
 
+  let isGeo = false
+  let isIndex = false
+  
+  let sumLng = 0, sumLat = 0, ptCount = 0
+
+  currentStep.tours.forEach((tour: any) => {
+    if (tour.stops && tour.stops.length > 0) {
+      const loc = tour.stops[0].location
+      if (loc?.lng !== undefined && loc?.lat !== undefined) {
+        isGeo = true
+        isGeoMode.value = true
+      }
+      else if (loc?.index !== undefined) isIndex = true
+    }
+  })
+
+  // Since Mapbox GL handles geo-rendering natively now, we bypass ECharts entirely for geo problems.
+  if (isGeo) {
+    return {}
+  }
+
+  const graphNodes = new Map<string, any>()
+  const graphLinks: any[] = []
+
   currentStep.tours.forEach((tour: any) => {
     const color = getVehicleColor(tour.vehicleId)
     const coords: [number, number][] = []
     const scatterData: any[] = []
+    let prevNodeId: string | null = null
 
     tour.stops.forEach((stop: any, stopIndex: number) => {
-      if (stop.location?.lng !== undefined && stop.location?.lat !== undefined) {
-        const x = stop.location.lng
-        const y = stop.location.lat
-        const activities = stop.activities || []
-        const primaryActivity = activities[0]
-        const jobId: string = primaryActivity?.jobId ?? ''
-        const pointLabel = jobId || primaryActivity?.type || `Stop ${stopIndex + 1}`
+      const hasGeo = stop.location?.lng !== undefined && stop.location?.lat !== undefined
+      const hasIdx = stop.location?.index !== undefined
+      if (!hasGeo && !hasIdx) return
+      
+      hasValidCoords = true
+      const activities = stop.activities || []
+      const primaryActivity = activities[0]
+      const jobId: string = primaryActivity?.jobId ?? ''
+      const pointLabel = jobId || primaryActivity?.type || `Stop ${stopIndex + 1}`
 
-        const fmtLoad = (load: unknown): string => {
-          if (Array.isArray(load)) return load.length ? load.join(', ') : 'N/A'
-          return load === undefined || load === null ? 'N/A' : String(load)
-        }
+      const fmtLoad = (load: unknown): string => {
+        if (Array.isArray(load)) return load.length ? load.join(', ') : 'N/A'
+        return load === undefined || load === null ? 'N/A' : String(load)
+      }
 
-        // Actual service duration from solution timestamps
-        const actualSvcSecs = (() => {
-          const arr = Date.parse(stop.time?.arrival)
-          const dep = Date.parse(stop.time?.departure)
-          if (!stop?.time?.arrival || !stop?.time?.departure || isNaN(arr) || isNaN(dep)) return null
-          return Math.round((dep - arr) / 1000)
-        })()
+      const actualSvcSecs = (() => {
+        const arr = Date.parse(stop.time?.arrival)
+        const dep = Date.parse(stop.time?.departure)
+        if (!stop?.time?.arrival || !stop?.time?.departure || isNaN(arr) || isNaN(dep)) return null
+        return Math.round((dep - arr) / 1000)
+      })()
 
-        // Job metadata from problem definition (may be absent for older runs)
-        const jm = jobsMeta.value[jobId]
-        const place0 = jm?.places?.[0]
-        const plannedSvcSecs: number | undefined = place0?.duration
-        const timeWindows: any[][] | undefined = place0?.times
-        const twStr = timeWindows?.length
-          ? timeWindows.map((tw: any[]) => `${tw[0]} – ${tw[1]}`).join(', ')
-          : undefined
+      const jm = jobsMeta.value[jobId]
+      const place0 = jm?.places?.[0]
+      const plannedSvcSecs: number | undefined = place0?.duration
+      const timeWindows: any[][] | undefined = place0?.times
+      const twStr = timeWindows?.length
+        ? timeWindows.map((tw: any[]) => `${tw[0]} – ${tw[1]}`).join(', ')
+        : undefined
+        
+      const skillsObj = jm?.skills
+      let skillsStr = '—'
+      if (skillsObj) {
+         const parts = []
+         if (skillsObj.allOf?.length) parts.push(`All: ${skillsObj.allOf.join(', ')}`)
+         if (skillsObj.anyOf?.length) parts.push(`Any: ${skillsObj.anyOf.join(', ')}`)
+         if (skillsObj.noneOf?.length) parts.push(`None: ${skillsObj.noneOf.join(', ')}`)
+         if (parts.length) skillsStr = parts.join(' | ')
+      }
+      
+      let shape = 'circle'
+      let size = 8
+      switch (primaryActivity?.type) {
+        case 'departure':
+        case 'arrival':
+        case 'depot':
+          shape = 'rect'
+          size = 12
+          break
+        case 'pickup':
+          shape = 'triangle'
+          size = 10
+          break
+        case 'delivery':
+          shape = 'circle'
+          size = 8
+          break
+        case 'recharge':
+          shape = 'diamond'
+          size = 12
+          break
+        case 'break':
+          shape = 'roundRect'
+          size = 10
+          break
+        default:
+          shape = 'circle'
+          size = 8
+          break
+      }
+      
+      const stopMeta = {
+        jobId,
+        pointLabel,
+        actType: primaryActivity?.type || 'stop',
+        vehicleId: tour.vehicleId,
+        lat: hasGeo ? stop.location.lat : 'N/A',
+        lng: hasGeo ? stop.location.lng : 'N/A',
+        arrival: stop.time?.arrival || 'N/A',
+        departure: stop.time?.departure || 'N/A',
+        actualSvc: actualSvcSecs !== null ? fmtSecs(actualSvcSecs) : 'N/A',
+        plannedSvc: plannedSvcSecs !== undefined ? fmtSecs(plannedSvcSecs) : '—',
+        timeWindows: twStr ?? '—',
+        distance: stop.distance ?? 'N/A',
+        load: fmtLoad(stop.load),
+        skills: skillsStr,
+      }
 
+      if (isIndex && hasIdx) {
+        const nodeId = `loc_${stop.location.index}`
         const isDepot = primaryActivity?.type === 'departure' || primaryActivity?.type === 'arrival' || primaryActivity?.type === 'depot'
         
-        coords.push([x, y])
-        hasValidCoords = true
-        scatterData.push({
-          name: pointLabel,
-          value: [x, y],
-          symbol: isDepot ? 'rect' : 'circle',
-          symbolSize: isDepot ? 12 : 8,
-          stopMeta: {
-            jobId,
-            pointLabel,
-            actType: primaryActivity?.type || 'stop',
-            vehicleId: tour.vehicleId,
-            lat: y,
-            lng: x,
-            arrival: stop.time?.arrival || 'N/A',
-            departure: stop.time?.departure || 'N/A',
-            actualSvc: actualSvcSecs !== null ? fmtSecs(actualSvcSecs) : 'N/A',
-            plannedSvc: plannedSvcSecs !== undefined ? fmtSecs(plannedSvcSecs) : '—',
-            timeWindows: twStr ?? '—',
-            distance: stop.distance ?? 'N/A',
-            load: fmtLoad(stop.load),
-          }
-        })
+        if (!graphNodes.has(nodeId)) {
+          graphNodes.set(nodeId, {
+            id: nodeId,
+            name: pointLabel,
+            symbol: shape,
+            symbolSize: size * 1.5,
+            itemStyle: { color: isDepot ? color : undefined },
+            stopMeta
+          })
+        }
+        
+        if (prevNodeId !== null && prevNodeId !== nodeId) {
+          graphLinks.push({
+            source: prevNodeId,
+            target: nodeId,
+            lineStyle: { color, width: 2, curveness: 0.2 }
+          })
+        }
+        prevNodeId = nodeId
       }
     })
+  })
 
-    const lineTooltip = {
-      formatter: () => {
-        return [
-          `<b>${tour.vehicleId}</b>`,
-          `Distance: ${tour.statistic?.distance ?? 'N/A'}`,
-          `Duration: ${tour.statistic?.duration != null ? fmtSecs(tour.statistic.duration) : 'N/A'}`
-        ].join('<br/>')
-      }
-    }
-
-    if (coords.length > 1) {
-      // First segment: Depot to the first demand point (solid line)
-      series.push({
-        type: 'lines',
-        coordinateSystem: 'cartesian2d',
-        data: [{ coords: [coords[0], coords[1]] }],
-        lineStyle: { color, width: 2.2, opacity: 0.9, type: 'solid' },
-        zlevel: 1,
-        tooltip: lineTooltip
-      })
-    }
-
-    if (coords.length > 2) {
-      // Subsequent segments: Connect the rest with dashed lines
-      series.push({
-        type: 'lines',
-        coordinateSystem: 'cartesian2d',
-        polyline: true,
-        data: [{ coords: coords.slice(1) }],
-        lineStyle: { color, width: 2.2, opacity: 0.6, type: 'dashed' },
-        zlevel: 1,
-        tooltip: lineTooltip
-      })
-    }
-
-    if (scatterData.length > 0) {
-      series.push({
-        type: 'scatter',
-        coordinateSystem: 'cartesian2d',
-        data: scatterData,
-        // symbolSize and symbol are defined in the data items
-        itemStyle: { color },
-        zlevel: 2,
-        tooltip: {
-          formatter: (params: any) => {
+  if (isIndex) {
+    series.push({
+      type: 'graph',
+      layout: 'force',
+      force: {
+        repulsion: 300,
+        edgeLength: [50, 100],
+        gravity: 0.1
+      },
+      roam: true,
+      data: Array.from(graphNodes.values()),
+      links: graphLinks,
+      label: { show: true, position: 'right', formatter: '{b}' },
+      tooltip: {
+        formatter: (params: any) => {
+          if (params.dataType === 'node') {
             const m = params.data?.stopMeta || {}
-            const lines = [
-              `<b>${m.vehicleId}</b> · ${m.pointLabel}`,
+            return [
+              `<b>${m.vehicleId || 'N/A'}</b> · ${m.pointLabel}`,
               `Type: ${m.actType}`,
-              `Lat/Lng: ${fmtCoord(m.lat)}, ${fmtCoord(m.lng)}`,
               `Arrival: ${m.arrival}`,
               `Departure: ${m.departure}`,
               `Actual service: ${m.actualSvc}`,
               `Planned service: ${m.plannedSvc}`,
               `Time window: ${m.timeWindows}`,
+              `Skills: ${m.skills}`,
               `Distance: ${m.distance}`,
               `Load: ${m.load}`,
-            ]
-            return lines.join('<br/>')
+            ].join('<br/>')
+          } else if (params.dataType === 'edge') {
+            return 'Route segment'
           }
         }
-      })
-    }
-  })
-
-  if (currentStep.unassigned?.length) {
-    const unassignedData = currentStep.unassigned
-      .filter((item: any) => item.location?.lng !== undefined)
-      .map((item: any) => ({
-        name: item.jobId || 'Unassigned',
-        value: [item.location.lng, item.location.lat]
-      }))
-
-    if (unassignedData.length > 0) {
-      series.push({
-        type: 'scatter',
-        coordinateSystem: 'cartesian2d',
-        data: unassignedData,
-        symbolSize: 6,
-        itemStyle: { color: '#94a3b8' },
-        zlevel: 2,
-        tooltip: { formatter: (params: any) => `Unassigned: ${params.name}` }
-      })
-    }
-  }
-
-  if (!hasValidCoords) {
-    return {
-      backgroundColor: 'transparent',
-      title: {
-        text: 'No valid coordinates found',
-        left: 'center',
-        top: 'center',
-        textStyle: { color: '#cbd5e1', fontSize: 16 }
       }
-    }
+    })
   }
 
-  return {
+  const baseOption: any = {
     title: { show: false },
     animationDuration: 300,
     animationDurationUpdate: 300,
     backgroundColor: 'transparent',
     tooltip: { trigger: 'item' },
-    grid: { left: 16, right: 16, top: 16, bottom: 16, containLabel: false },
-    xAxis: {
-      type: 'value',
-      scale: true,
-      axisLine: { show: false },
-      axisLabel: { show: false },
-      splitLine: { show: false }
-    },
-    yAxis: {
-      type: 'value',
-      scale: true,
-      axisLine: { show: false },
-      axisLabel: { show: false },
-      splitLine: { show: false }
-    },
-    dataZoom: [
-      { type: 'inside', xAxisIndex: 0, filterMode: 'none' },
-      { type: 'inside', yAxisIndex: 0, filterMode: 'none' }
-    ],
     series
   }
+
+  return baseOption
 })
 
 onMounted(() => {
   fetchProblems()
+  
+  if (mapContainer.value) {
+    mainMapChart = echarts.init(mapContainer.value)
+    mainMapChart.setOption(mapChartOption.value)
+    const resizeObserver = new ResizeObserver(() => {
+      mainMapChart?.resize()
+    })
+    resizeObserver.observe(mapContainer.value)
+  }
 })
+
+watch(() => mapChartOption.value, (newOpt) => {
+  if (mainMapChart && newOpt) {
+    mainMapChart.setOption(newOpt, true)
+  }
+}, { deep: true })
+
+watch(() => [isGeoMode.value, mapboxToken.value], async ([isGeo, token]) => {
+  await nextTick()
+  if (isGeo) {
+    if (!mapboxMapInstance && token && mapboxContainer.value) {
+      mapboxgl.accessToken = token as string
+      mapboxMapInstance = new mapboxgl.Map({
+        container: mapboxContainer.value,
+        style: 'mapbox://styles/mapbox/dark-v11',
+        center: [0, 0],
+        zoom: 2
+      })
+      mapboxMapInstance.on('load', updateMapboxData)
+    } else if (mapboxMapInstance) {
+      mapboxMapInstance.resize()
+      if (token) mapboxgl.accessToken = token as string
+    }
+  } else {
+    if (mapContainer.value) {
+      if (mainMapChart) mainMapChart.dispose()
+      mainMapChart = echarts.init(mapContainer.value)
+      mainMapChart.setOption(mapChartOption.value)
+    }
+  }
+})
+
+const updateMapboxData = () => {
+  const map = mapboxMapInstance
+  if (!map || !map.isStyleLoaded() || !currentSnapshot.value) return
+  
+  const step = currentSnapshot.value
+  const lineFeatures: any[] = []
+  const pointFeatures: any[] = []
+  const unassignedFeatures: any[] = []
+  
+  let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity
+  let hasValidCoords = false
+  
+  const colors = [
+    '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'
+  ]
+  
+  step.tours?.forEach((tour: any, index: number) => {
+    const color = colors[index % colors.length]
+    const coords: [number, number][] = []
+    
+    tour.stops?.forEach((stop: any) => {
+      const act = stop.activities?.[0]
+      const isGeo = stop.location?.lng !== undefined && stop.location?.lat !== undefined
+      if (isGeo) {
+        const lng = stop.location.lng
+        const lat = stop.location.lat
+        coords.push([lng, lat])
+        hasValidCoords = true
+        minLng = Math.min(minLng, lng)
+        maxLng = Math.max(maxLng, lng)
+        minLat = Math.min(minLat, lat)
+        maxLat = Math.max(maxLat, lat)
+        
+        pointFeatures.push({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [lng, lat] },
+          properties: {
+            color: color,
+            id: act?.jobId || 'depot',
+            type: act?.type || 'stop',
+            arrival: stop.time?.arrival || '',
+            vehicleId: tour.vehicleId,
+            radius: (act?.type === 'departure' || act?.type === 'arrival' || act?.type === 'depot') ? 8 : 5
+          }
+        })
+      }
+    })
+    
+    if (coords.length > 1) {
+      lineFeatures.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: coords },
+        properties: { color: color, vehicleId: tour.vehicleId }
+      })
+    }
+  })
+  
+  step.unassigned?.forEach((item: any) => {
+    if (item.location?.lng !== undefined) {
+      const lng = item.location.lng
+      const lat = item.location.lat
+      hasValidCoords = true
+      minLng = Math.min(minLng, lng)
+      maxLng = Math.max(maxLng, lng)
+      minLat = Math.min(minLat, lat)
+      maxLat = Math.max(maxLat, lat)
+      
+      unassignedFeatures.push({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [lng, lat] },
+        properties: {
+            color: '#94a3b8',
+            id: item.jobId || 'Unassigned',
+            type: 'unassigned',
+            radius: 5
+        }
+      })
+    }
+  })
+  
+  if (!map.getSource('vrp-lines')) {
+    map.addSource('vrp-lines', { type: 'geojson', data: { type: 'FeatureCollection', features: lineFeatures } })
+    map.addLayer({
+      id: 'vrp-lines-layer',
+      type: 'line',
+      source: 'vrp-lines',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': ['get', 'color'], 'line-width': 2, 'line-opacity': 0.8 }
+    })
+    
+    map.addSource('vrp-points', { type: 'geojson', data: { type: 'FeatureCollection', features: [...pointFeatures, ...unassignedFeatures] } })
+    map.addLayer({
+      id: 'vrp-points-layer',
+      type: 'circle',
+      source: 'vrp-points',
+      paint: {
+        'circle-radius': ['get', 'radius'],
+        'circle-color': ['get', 'color'],
+        'circle-stroke-width': 1,
+        'circle-stroke-color': '#fff'
+      }
+    })
+    
+    const popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false })
+    map.on('mouseenter', 'vrp-points-layer', (e: any) => {
+        map.getCanvas().style.cursor = 'pointer'
+        const p = e.features[0].properties
+        const html = `<b>${p.vehicleId || 'N/A'}</b><br/>Type: ${p.type}<br/>ID: ${p.id}<br/>Arr: ${p.arrival || 'N/A'}`
+        popup.setLngLat(e.features[0].geometry.coordinates).setHTML(html).addTo(map)
+    })
+    map.on('mouseleave', 'vrp-points-layer', () => {
+        map.getCanvas().style.cursor = ''
+        popup.remove()
+    })
+  } else {
+    (map.getSource('vrp-lines') as mapboxgl.GeoJSONSource).setData({ type: 'FeatureCollection', features: lineFeatures });
+    (map.getSource('vrp-points') as mapboxgl.GeoJSONSource).setData({ type: 'FeatureCollection', features: [...pointFeatures, ...unassignedFeatures] });
+  }
+  
+  if (hasValidCoords && minLng !== Infinity && !currentProblemFitted) {
+    currentProblemFitted = true
+    if (minLng === maxLng) { minLng -= 0.05; maxLng += 0.05 }
+    if (minLat === maxLat) { minLat -= 0.05; maxLat += 0.05 }
+    map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 60, duration: 1500 })
+  }
+}
+
+watch(() => currentSnapshot.value, () => {
+  if (isGeoMode.value) {
+    updateMapboxData()
+  }
+}, { deep: true })
+
+
+// Keep fetching updates
+setInterval(() => {
+  fetchProblems()
+}, 2000)
 </script>
 
 <template>
@@ -493,16 +702,35 @@ onMounted(() => {
       </div>
 
       <div class="toolbar">
+        <a-upload
+          action="/api/upload"
+          :showUploadList="false"
+          accept=".txt"
+          @change="handleUploadChange"
+          :disabled="running"
+        >
+          <a-button type="dashed" style="margin-right: 8px" :disabled="running">
+            <template #icon><UploadOutlined /></template>
+            Upload
+          </a-button>
+        </a-upload>
         <a-select
           v-model:value="selectedProblem"
-          :options="problems.map((p) => ({ label: p.name, value: p.path }))"
           placeholder="Select a problem"
           style="min-width: 220px"
           :disabled="running || problems.length === 0"
-        />
+          @change="fetchInitialState"
+        >
+          <a-select-option v-for="p in problems" :key="p.path" :value="p.path">
+            <BookOutlined v-if="p.source === 'examples'" style="margin-right: 8px; color: #1890ff" />
+            <UserOutlined v-else style="margin-right: 8px; color: #52c41a" />
+            {{ p.name }}
+          </a-select-option>
+        </a-select>
         <a-input-number v-model:value="maxTime" :min="1" placeholder="Max Time (s)" style="width: 120px" :disabled="running" />
         <a-input-number v-model:value="maxGen" :min="1" placeholder="Max Gen" style="width: 120px" :disabled="running" />
         
+
         <a-button type="primary" v-if="!running" :icon="h(PlayCircleOutlined)" @click.prevent="startSolver" :disabled="!selectedProblem">Run</a-button>
         <a-button danger v-else :icon="h(StopOutlined)" @click="stopSolver">Stop</a-button>
       </div>
@@ -538,14 +766,16 @@ onMounted(() => {
                 </div>
               </template>
 
-              <div class="chart-shell">
-                  <v-chart
-                    class="map-chart"
-                    :key="`${selectedProblem}`"
-                    :option="mapChartOption"
-                    :update-options="{ notMerge: true }"
-                  autoresize
-                />
+              <div class="chart-shell" style="position: relative">
+                  <div class="mapbox-token-floater" v-if="(!mapboxToken || !running) && isGeoMode">
+                    <a-input-password
+                      v-model:value="mapboxToken"
+                      placeholder="Mapbox Token (Required for Mapbox)"
+                      size="small"
+                    />
+                  </div>
+                  <div v-show="!isGeoMode" ref="mapContainer" class="map-chart"></div>
+                  <div v-show="isGeoMode" ref="mapboxContainer" class="map-chart"></div>
               </div>
 
               <template #extra>
@@ -996,5 +1226,29 @@ onMounted(() => {
   .section-title {
     font-size: 16px;
   }
+}
+.mapbox-token-floater {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 10;
+  width: 160px;
+  opacity: 0.8;
+  transition: opacity 0.3s;
+}
+
+.mapbox-token-floater:hover {
+  opacity: 1;
+}
+
+.mapbox-token-floater .ant-input-affix-wrapper {
+  background: rgba(30, 41, 59, 0.8) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.mapbox-token-floater .ant-input {
+  background: transparent !important;
+  color: #f8fafc;
 }
 </style>

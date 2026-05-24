@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
+from fastapi import UploadFile, File, Form
 import uvicorn
 from vrp_cli import Problem, Config, RoutingMatrix, solve as vrp_solve
 
@@ -30,17 +31,49 @@ def find_problems():
                 matrix_path = problem_path.replace(".problem.json", ".matrix.json")
                 has_matrix = os.path.exists(matrix_path)
                 
+                source = "examples" if "examples" in str(path) else "user"
                 problems.append({
                     "id": problem_path,
                     "name": path.stem,
                     "path": problem_path,
-                    "matrix_path": matrix_path if has_matrix else None
+                    "matrix_path": matrix_path if has_matrix else None,
+                    "source": source
                 })
     return problems
 
 @app.get("/api/problems")
 async def get_problems():
     return JSONResponse({"problems": find_problems()})
+
+@app.post("/api/upload")
+async def upload_problem(file: UploadFile = File(...)):
+    try:
+        content = await file.read()
+        content_str = content.decode("utf-8")
+        
+        # Determine if it's solomon (starts with some text usually)
+        from vrp_studio.solomon import parse_solomon
+        name, problem, matrix = parse_solomon(content_str)
+        
+        data_dir = Path("../data") if os.path.exists("../data") else Path("data")
+        data_dir.mkdir(parents=True, exist_ok=True)
+        
+        # To avoid collisions
+        base_name = name.lower().replace(" ", "_")
+        if not base_name:
+            base_name = file.filename.split('.')[0]
+            
+        prob_path = data_dir / f"{base_name}.problem.json"
+        matrix_path = data_dir / f"{base_name}.matrix.json"
+        
+        with open(prob_path, "w") as f:
+            json.dump(problem, f, indent=2)
+        with open(matrix_path, "w") as f:
+            json.dump(matrix, f, indent=2)
+            
+        return JSONResponse({"success": True, "message": "Uploaded and converted successfully", "problem_path": str(prob_path)})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
 
 from pydantic import BaseModel
 
