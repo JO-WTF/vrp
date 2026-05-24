@@ -162,12 +162,15 @@ async def get_initial_state(req: ProblemRequest):
         return JSONResponse({"error": str(e)}, status_code=400)
 
 class SolverThread(threading.Thread):
-    def __init__(self, problem_path, matrix_path, max_time, max_gen, updates_queue):
+    def __init__(self, problem_path, matrix_path, max_time, max_gen, parallelism, termination_cfg, heuristic_mode, updates_queue):
         super().__init__()
         self.problem_path = problem_path
         self.matrix_path = matrix_path
         self.max_time = max_time
         self.max_gen = max_gen
+        self.parallelism = parallelism
+        self.termination_cfg = termination_cfg
+        self.heuristic_mode = heuristic_mode
         self.updates_queue = updates_queue
         self._stop_event = threading.Event()
         self.error = None
@@ -180,7 +183,48 @@ class SolverThread(threading.Thread):
             from vrp_cli.vis.tracker import _extract_jobs_meta
             problem = Problem.from_json(self.problem_path)
             matrices = [RoutingMatrix.from_json(self.matrix_path)] if self.matrix_path else None
-            config = Config(max_time=self.max_time, max_generations=self.max_gen)
+            preset_dict = {}
+            if self.heuristic_mode == "fast":
+                preset_dict = {
+                    "evolution": {
+                        "population": {
+                            "type": "elitism",
+                            "maxSize": 8,
+                            "selectionSize": 4
+                        }
+                    }
+                }
+            elif self.heuristic_mode == "deep":
+                preset_dict = {
+                    "evolution": {
+                        "population": {
+                            "type": "rosomaxa",
+                            "maxEliteSize": 4,
+                            "maxNodeSize": 4,
+                            "explorationRatio": 0.9
+                        }
+                    }
+                }
+            elif self.heuristic_mode == "large_scale":
+                preset_dict = {
+                    "evolution": {
+                        "population": {
+                            "type": "rosomaxa",
+                            "maxNodeSize": 2,
+                            "explorationRatio": 0.4
+                        }
+                    },
+                    "hyper": {
+                        "type": "static-selective"
+                    }
+                }
+            
+            config = Config(data=preset_dict)
+
+            # Apply overrides on top of the preset
+            config.set_termination(max_time=self.max_time, max_generations=self.max_gen, variation=self.termination_cfg.get("variation") if self.termination_cfg else None)
+            if self.parallelism is not None:
+                config.set_parallelism(self.parallelism)
             
             jobs_meta = _extract_jobs_meta(problem)
             self.updates_queue.put({"type": "metadata", "data": jobs_meta})
@@ -246,9 +290,22 @@ async def websocket_endpoint(websocket: WebSocket):
             matrix_path = data.get("matrix_path")
             max_time = data.get("max_time", 60)
             max_gen = data.get("max_gen", 3000)
+            parallelism = data.get("parallelism")
+            heuristic_mode = data.get("heuristic_mode", "default")
+            
+            termination_cfg = None
+            if data.get("variation_sample") is not None and data.get("variation_cv") is not None:
+                termination_cfg = {
+                    "variation": {
+                        "intervalType": "sample",
+                        "value": data.get("variation_sample"),
+                        "cv": data.get("variation_cv"),
+                        "isGlobal": True
+                    }
+                }
             
             updates_queue = queue.Queue()
-            solver_thread = SolverThread(problem_path, matrix_path, max_time, max_gen, updates_queue)
+            solver_thread = SolverThread(problem_path, matrix_path, max_time, max_gen, parallelism, termination_cfg, heuristic_mode, updates_queue)
             solver_thread.start()
             
             start_time = time.time()

@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, h, watch, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import VChart from 'vue-echarts'
-import { PlayCircleOutlined, PauseCircleOutlined, StopOutlined, DollarOutlined, EnvironmentOutlined, FieldTimeOutlined, CarOutlined, DashboardOutlined, InboxOutlined, HourglassOutlined, CoffeeOutlined, UploadOutlined, BookOutlined, UserOutlined } from '@ant-design/icons-vue'
+import { PlayCircleOutlined, PauseCircleOutlined, StopOutlined, DollarOutlined, EnvironmentOutlined, FieldTimeOutlined, CarOutlined, DashboardOutlined, InboxOutlined, HourglassOutlined, CoffeeOutlined, UploadOutlined, BookOutlined, UserOutlined, SettingOutlined } from '@ant-design/icons-vue'
 import { theme, message } from 'ant-design-vue'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import mapboxgl from 'mapbox-gl'
@@ -16,8 +16,18 @@ const isGeoMode = ref(false)
 let currentProblemFitted = false
 
 const problems = ref<any[]>([])
-const maxTime = ref<number>(60)
-const maxGen = ref<number>(3000)
+const maxTime = ref<number>(10)
+const maxGen = ref<number>(10000)
+
+watch(maxTime, (newVal) => {
+  maxGen.value = newVal * 1000
+})
+
+const parallelism = ref<number | undefined>(undefined)
+const variationSample = ref<number | undefined>(undefined)
+const variationCv = ref<number | undefined>(undefined)
+const heuristicMode = ref<string>('default')
+const isSettingsVisible = ref<boolean>(false)
 const selectedProblem = ref<string | undefined>(undefined)
 const mapboxToken = ref<string>(localStorage.getItem('mapboxToken') || '')
 const activeTab = ref<string>('map')
@@ -81,7 +91,11 @@ const startSolver = () => {
       problem_path: p.path,
       matrix_path: p.matrix_path,
       max_time: maxTime.value,
-      max_gen: maxGen.value
+      max_gen: maxGen.value,
+      parallelism: parallelism.value,
+      variation_sample: variationSample.value,
+      variation_cv: variationCv.value,
+      heuristic_mode: heuristicMode.value
     }))
   }
   
@@ -819,9 +833,13 @@ const updateMapboxData = () => {
   })
   
   step.unassigned?.forEach((item: any) => {
-    if (item.location?.lng !== undefined) {
-      const lng = item.location.lng
-      const lat = item.location.lat
+    const jobId = item.jobId
+    const jm = jobsMeta.value[jobId]
+    const loc = jm?.places?.[0]?.location
+
+    if (loc?.lng !== undefined) {
+      const lng = loc.lng
+      const lat = loc.lat
       hasValidCoords = true
       minLng = Math.min(minLng, lng)
       maxLng = Math.max(maxLng, lng)
@@ -837,8 +855,8 @@ const updateMapboxData = () => {
             color: typeColorMap[actType] ?? '#94a3b8',
             vehicleColor: '#475569',
             emoji: typeEmojiMap[actType] ?? '✕',
-            id: item.jobId || 'Unassigned',
-            pointLabel: item.jobId || 'Unassigned',
+            id: jobId || 'Unassigned',
+            pointLabel: jobId || 'Unassigned',
             type: actType,
             arrival: 'N/A',
             departure: 'N/A',
@@ -1045,8 +1063,7 @@ setInterval(() => {
             {{ p.name }}
           </a-select-option>
         </a-select>
-        <a-input-number v-model:value="maxTime" :min="1" placeholder="Max Time (s)" style="width: 120px" :disabled="running" />
-        <a-input-number v-model:value="maxGen" :min="1" placeholder="Max Gen" style="width: 120px" :disabled="running" />
+        <a-button type="default" :icon="h(SettingOutlined)" @click="isSettingsVisible = true">Settings</a-button>
         
 
         <a-button type="primary" v-if="!running" :icon="h(PlayCircleOutlined)" @click.prevent="startSolver" :disabled="!selectedProblem">Run</a-button>
@@ -1225,6 +1242,65 @@ setInterval(() => {
           </a-col>
         </a-row>
     </a-layout-content>
+
+    <a-drawer
+      title="Solver Configuration"
+      placement="right"
+      v-model:open="isSettingsVisible"
+      :width="320"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="Heuristic Preset" extra="Core algorithm configuration template.">
+          <a-select v-model:value="heuristicMode" :disabled="running" style="width: 100%">
+            <a-select-option value="default">Default</a-select-option>
+            <a-select-option value="fast">Fast (Greedy)</a-select-option>
+            <a-select-option value="deep">Deep (Rosomaxa)</a-select-option>
+            <a-select-option value="large_scale">Large Scale</a-select-option>
+          </a-select>
+          
+          <div v-if="heuristicMode !== 'default'" style="margin-top: 12px; padding: 10px; background: rgba(255, 255, 255, 0.05); border-radius: 6px; font-size: 13px; color: #cbd5e1; border-left: 3px solid #38bdf8;">
+            <div v-if="heuristicMode === 'fast'">
+              <b>Population:</b> Elitism (Pool: 8, Select: 4)<br>
+              <b>Optimized for:</b> Viable solution rapidly without getting trapped.<br>
+            </div>
+            <div v-else-if="heuristicMode === 'deep'">
+              <b>Population:</b> Rosomaxa (Exploration: 0.9)<br>
+              <b>Optimized for:</b> Deep global optimum search.<br>
+            </div>
+            <div v-else-if="heuristicMode === 'large_scale'">
+              <b>Population:</b> Rosomaxa (Lightweight)<br>
+              <b>Hyper-heuristic:</b> Static Selective<br>
+              <b>Optimized for:</b> Thousands of jobs, reduced CPU overhead.<br>
+            </div>
+          </div>
+        </a-form-item>
+        <a-form-item label="Max Time (seconds)" extra="Maximum allowed time for the solver to run.">
+          <a-input-number v-model:value="maxTime" :min="1" :disabled="running" style="width: 100%" />
+        </a-form-item>
+        <a-form-item label="Max Generations" extra="Maximum number of generations for the evolutionary algorithm.">
+          <a-input-number v-model:value="maxGen" :min="1" :disabled="running" style="width: 100%" />
+        </a-form-item>
+
+        <a-divider style="border-color: #334155; margin: 16px 0;" />
+        <h4 style="color: #e2e8f0; margin-bottom: 12px; font-weight: 600;">Advanced Tuning</h4>
+        
+        <a-form-item label="Parallelism (Threads)" extra="Number of CPU threads to use. Leave empty for auto.">
+          <a-input-number v-model:value="parallelism" :min="1" :disabled="running" style="width: 100%" placeholder="Auto" />
+        </a-form-item>
+        <a-form-item label="Termination Sample Size" extra="Number of iterations to calculate coefficient of variation. Leave empty for default.">
+          <a-input-number v-model:value="variationSample" :min="10" :disabled="running" style="width: 100%" placeholder="Default" />
+        </a-form-item>
+        <a-form-item label="Termination CV Target" extra="Coefficient of Variation target for early stopping (e.g. 0.1). Leave empty for default.">
+          <a-input-number v-model:value="variationCv" :min="0" :max="1" :step="0.01" :disabled="running" style="width: 100%" placeholder="Default" />
+        </a-form-item>
+
+        <div style="margin-top: 24px; padding: 12px; background: rgba(56, 189, 248, 0.1); border-radius: 8px; border: 1px solid rgba(56, 189, 248, 0.3);">
+          <p style="margin: 0; color: #38bdf8; font-size: 13px;">
+            <b style="color: #f8fafc">Note:</b> Parameters cannot be changed while the solver is actively running. Stop the solver first to adjust these settings.
+          </p>
+        </div>
+      </a-form>
+    </a-drawer>
   </a-layout>
   </a-config-provider>
 </template>

@@ -35,6 +35,19 @@ def parse_solomon(content: str):
     depot = next(c for c in customers if c["id"] == 0)
     jobs = [c for c in customers if c["id"] != 0]
     
+    # Map coordinates to Beijing bounding box
+    min_x = min(c["x"] for c in customers)
+    max_x = max(c["x"] for c in customers)
+    min_y = min(c["y"] for c in customers)
+    max_y = max(c["y"] for c in customers)
+    range_x = max_x - min_x if max_x > min_x else 1
+    range_y = max_y - min_y if max_y > min_y else 1
+    min_lng, max_lng = 116.30, 116.45
+    min_lat, max_lat = 39.85, 40.00
+    for c in customers:
+        c["lng"] = min_lng + ((c["x"] - min_x) / range_x) * (max_lng - min_lng)
+        c["lat"] = min_lat + ((c["y"] - min_y) / range_y) * (max_lat - min_lat)
+    
     points = [(c["x"], c["y"]) for c in customers]
     distances = []
     
@@ -42,8 +55,9 @@ def parse_solomon(content: str):
         for j in range(len(points)):
             dx = points[i][0] - points[j][0]
             dy = points[i][1] - points[j][1]
-            dist = round(math.sqrt(dx*dx + dy*dy), 2)
-            distances.append(dist)
+            dist = math.sqrt(dx*dx + dy*dy)
+            dist_int = int(round(dist * 10))
+            distances.append(dist_int)
             
     matrix = {
         "profile": "normal_car",
@@ -53,7 +67,7 @@ def parse_solomon(content: str):
     
     epoch = datetime(2023, 1, 1, 0, 0, 0)
     def fmt_time(t):
-        return (epoch + timedelta(seconds=t)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return (epoch + timedelta(seconds=t * 10)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     pragmatic_jobs = []
     for j in jobs:
@@ -61,8 +75,8 @@ def parse_solomon(content: str):
             "id": f"job_{j['id']}",
             "deliveries": [{
                 "places": [{
-                    "location": {"index": j["id"]},
-                    "duration": j["service"],
+                    "location": {"lat": j["lat"], "lng": j["lng"]},
+                    "duration": j["service"] * 10,
                     "times": [[fmt_time(j['ready']), fmt_time(j['due'])]]
                 }],
                 "demand": [j["demand"]]
@@ -82,11 +96,11 @@ def parse_solomon(content: str):
                 "shifts": [{
                     "start": {
                         "earliest": fmt_time(depot['ready']),
-                        "location": {"index": 0}
+                        "location": {"lat": depot["lat"], "lng": depot["lng"]}
                     },
                     "end": {
                         "latest": fmt_time(depot['due']),
-                        "location": {"index": 0}
+                        "location": {"lat": depot["lat"], "lng": depot["lng"]}
                     }
                 }],
                 "capacity": [capacity]
