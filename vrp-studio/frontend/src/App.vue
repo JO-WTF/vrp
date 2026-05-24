@@ -2,23 +2,25 @@
 import { computed, onMounted, ref, h, watch, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import VChart from 'vue-echarts'
-import { PlayCircleOutlined, StopOutlined, DollarOutlined, EnvironmentOutlined, FieldTimeOutlined, CarOutlined, DashboardOutlined, InboxOutlined, HourglassOutlined, CoffeeOutlined, StepBackwardOutlined, StepForwardOutlined, UploadOutlined, BookOutlined, UserOutlined } from '@ant-design/icons-vue'
+import { PlayCircleOutlined, PauseCircleOutlined, StopOutlined, DollarOutlined, EnvironmentOutlined, FieldTimeOutlined, CarOutlined, DashboardOutlined, InboxOutlined, HourglassOutlined, CoffeeOutlined, UploadOutlined, BookOutlined, UserOutlined } from '@ant-design/icons-vue'
 import { theme, message } from 'ant-design-vue'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import mapboxgl from 'mapbox-gl'
 
 const mapContainer = ref<HTMLElement | null>(null)
 const mapboxContainer = ref<HTMLElement | null>(null)
+const ganttChartRef = ref<any>(null)
 let mainMapChart: any = null
 let mapboxMapInstance: mapboxgl.Map | null = null
 const isGeoMode = ref(false)
 let currentProblemFitted = false
 
 const problems = ref<any[]>([])
-const selectedProblem = ref<string | null>(null)
 const maxTime = ref<number>(60)
 const maxGen = ref<number>(3000)
-const mapboxToken = ref(localStorage.getItem('mapboxToken') || '')
+const selectedProblem = ref<string | undefined>(undefined)
+const mapboxToken = ref<string>(localStorage.getItem('mapboxToken') || '')
+const activeTab = ref<string>('map')
 
 watch(mapboxToken, (newVal) => {
   if (newVal) {
@@ -168,15 +170,33 @@ const handleUploadChange = (info: any) => {
   }
 }
 
-const jumpToPreviousSolution = () => {
-  if (!runData.value?.history?.length) return
-  currentHistoryIndex.value = Math.max(currentHistoryIndex.value - 1, 0)
+
+
+const isPlaying = ref(false)
+let playInterval: any = null
+
+const togglePlay = () => {
+  if (isPlaying.value) {
+    isPlaying.value = false
+    if (playInterval) clearInterval(playInterval)
+  } else {
+    isPlaying.value = true
+    playInterval = setInterval(() => {
+      if (!runData.value?.history?.length) return
+      if (currentHistoryIndex.value >= runData.value.history.length - 1) {
+        currentHistoryIndex.value = 0 // loop back
+      } else {
+        currentHistoryIndex.value++
+      }
+    }, 500) // 500ms per frame
+  }
 }
 
-const jumpToNextSolution = () => {
-  if (!runData.value?.history?.length) return
-  currentHistoryIndex.value = Math.min(currentHistoryIndex.value + 1, runData.value.history.length - 1)
-}
+watch(running, (newVal) => {
+  if (newVal && isPlaying.value) {
+    togglePlay() // Auto-pause if we start real-time solving
+  }
+})
 
 const currentStats = computed(() => {
   if (!runData.value?.history?.length) return null
@@ -208,6 +228,58 @@ const fmtCoord = (v: number | undefined | null): string =>
   v === undefined || v === null || Number.isNaN(v) ? 'N/A' : Number(v).toFixed(5)
 
 const colors = ['#8b5cf6', '#38bdf8', '#34d399', '#f59e0b', '#f472b6', '#22d3ee', '#fb7185', '#a78bfa']
+
+const typeColorMap: Record<string, string> = {
+  departure: '#f8fafc',
+  arrival: '#f8fafc',
+  depot: '#f8fafc',
+  pickup: '#34d399',
+  delivery: '#38bdf8',
+  recharge: '#facc15',
+  break: '#fb923c',
+  service: '#38bdf8',
+  stop: '#f8fafc',
+  replacement: '#a78bfa',
+  unassigned: '#94a3b8',
+}
+
+const typeEmojiMap: Record<string, string> = {
+  departure: '⬛',
+  arrival: '⬛',
+  depot: '⬛',
+  pickup: '▲',
+  delivery: '▼',
+  recharge: '◆',
+  break: '◼',
+  service: '▼',
+  stop: '▪',
+  replacement: '◆',
+  unassigned: '✕',
+}
+
+const getStopColor = (stop: any) => {
+  const t = stop.activities?.[0]?.type || 'stop'
+  return typeColorMap[t] || '#38bdf8'
+}
+
+const getStopEmoji = (stop: any) => {
+  const t = stop.activities?.[0]?.type || 'stop'
+  return typeEmojiMap[t] || '●'
+}
+
+const unassignedData = computed(() => {
+  if (!currentSnapshot.value?.unassigned) return []
+  return currentSnapshot.value.unassigned.map((item: any) => ({
+    jobId: item.jobId,
+    actType: item.actType || 'unassigned',
+    reason: item.reason || 'No specific reason provided'
+  }))
+})
+
+const unassignedColumns = [
+  { title: 'Job ID', dataIndex: 'jobId', key: 'jobId' },
+  { title: 'Reason', dataIndex: 'reason', key: 'reason' }
+]
 
 const convergenceChartOption = computed(() => {
   if (!runData.value?.history?.length || !currentSnapshot.value) return {}
@@ -275,6 +347,95 @@ const convergenceChartOption = computed(() => {
             ]
           }
         }
+      }
+    ]
+  }
+})
+
+const ganttChartOption = computed(() => {
+  if (!currentSnapshot.value?.tours) return {}
+  
+  const tours = currentSnapshot.value.tours
+  const vehicleCategories: string[] = []
+  const data: any[] = []
+  
+  tours.forEach((tour: any, vIndex: number) => {
+    vehicleCategories.push(tour.vehicleId)
+    
+    tour.stops?.forEach((stop: any) => {
+      const act = stop.activities?.[0]
+      const arrStr = stop.time?.arrival
+      const depStr = stop.time?.departure
+      
+      if (arrStr && depStr) {
+        const arrMs = new Date(arrStr).getTime()
+        const depMs = new Date(depStr).getTime()
+        const actType = act?.type || 'stop'
+        
+        let color = '#38bdf8' // default delivery
+        if (actType === 'depot') color = '#94a3b8'
+        else if (actType === 'pickup') color = '#34d399'
+        else if (actType === 'break') color = '#fb923c'
+        else if (actType === 'recharge') color = '#facc15'
+        
+        data.push({
+          name: act?.jobId || actType,
+          value: [vIndex, arrMs, depMs, actType],
+          itemStyle: { color }
+        })
+      }
+    })
+  })
+  
+  return {
+    backgroundColor: 'transparent',
+    tooltip: {
+      formatter: (params: any) => {
+        const d = params.value
+        return `<b>${params.name}</b><br/>Type: ${d[3]}<br/>Arrival: ${new Date(d[1]).toLocaleTimeString()}<br/>Departure: ${new Date(d[2]).toLocaleTimeString()}`
+      },
+      backgroundColor: 'rgba(15, 23, 42, 0.9)',
+      textStyle: { color: '#f8fafc' }
+    },
+    grid: { left: 80, right: 20, top: 20, bottom: 40 },
+    xAxis: {
+      type: 'time',
+      axisLine: { lineStyle: { color: '#334155' } },
+      axisLabel: { color: '#94a3b8' },
+      splitLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.12)' } }
+    },
+    yAxis: {
+      type: 'category',
+      data: vehicleCategories,
+      axisLine: { lineStyle: { color: '#334155' } },
+      axisLabel: { color: '#94a3b8' }
+    },
+    dataZoom: [
+      { type: 'slider', filterMode: 'weakFilter', showDataShadow: false, bottom: 0, height: 16, borderColor: 'transparent', backgroundColor: '#1e293b', handleIcon: 'path://M10.7,11.9H9.3c-1.4,0-2.5-1.1-2.5-2.5V4.2c0-1.4,1.1-2.5,2.5-2.5h1.4c1.4,0,2.5,1.1,2.5,2.5v5.2C13.2,10.8,12.1,11.9,10.7,11.9z M13.3,4.2c0-0.8-0.7-1.5-1.5-1.5H9.3c-0.8,0-1.5,0.7-1.5,1.5v5.2c0,0.8,0.7,1.5,1.5,1.5h2.5c0.8,0,1.5-0.7,1.5-1.5V4.2z M5.1,11.9H3.7c-1.4,0-2.5-1.1-2.5-2.5V4.2c0-1.4,1.1-2.5,2.5-2.5h1.4c1.4,0,2.5,1.1,2.5,2.5v5.2C7.6,10.8,6.5,11.9,5.1,11.9z M7.7,4.2c0-0.8-0.7-1.5-1.5-1.5H3.7c-0.8,0-1.5,0.7-1.5,1.5v5.2c0,0.8,0.7,1.5,1.5,1.5h1.4c0.8,0,1.5-0.7,1.5-1.5V4.2z', handleSize: '100%', handleStyle: { color: '#94a3b8' }, textStyle: { color: 'transparent' } },
+      { type: 'inside', filterMode: 'weakFilter' }
+    ],
+    series: [
+      {
+        type: 'custom',
+        renderItem: (params: any, api: any) => {
+          const categoryIndex = api.value(0)
+          const start = api.coord([api.value(1), categoryIndex])
+          const end = api.coord([api.value(2), categoryIndex])
+          const height = api.size([0, 1])[1] * 0.6
+          const rectShape = echarts.graphic.clipRectByRect(
+            { x: start[0], y: start[1] - height / 2, width: Math.max(end[0] - start[0], 2), height: height },
+            { x: params.coordSys.x, y: params.coordSys.y, width: params.coordSys.width, height: params.coordSys.height }
+          )
+          return rectShape && {
+            type: 'rect',
+            transition: ['shape'],
+            shape: rectShape,
+            style: api.style()
+          }
+        },
+        itemStyle: { opacity: 0.8 },
+        encode: { x: [1, 2], y: 0 },
+        data: data
       }
     ]
   }
@@ -614,29 +775,6 @@ const updateMapboxData = () => {
            if (parts.length) skillsStr = parts.join(' | ')
         }
         
-        // Fixed colors by stop type (overrides vehicle color)  
-        const typeColorMap: Record<string, string> = {
-          departure: '#f8fafc',
-          arrival: '#f8fafc',
-          depot: '#f8fafc',
-          pickup: '#34d399',
-          delivery: '#38bdf8',
-          recharge: '#facc15',
-          break: '#fb923c',
-          service: color,
-          stop: color,
-        }
-        const typeEmojiMap: Record<string, string> = {
-          departure: '⬛',
-          arrival: '⬛',
-          depot: '⬛',
-          pickup: '▲',
-          delivery: '▼',
-          recharge: '◆',
-          break: '◼',
-          service: '▼',
-          stop: '▪',
-        }
         const actType = act?.type || 'stop'
         const typeColor = typeColorMap[actType] ?? color
         const typeEmoji = typeEmojiMap[actType] ?? '●'
@@ -691,20 +829,7 @@ const updateMapboxData = () => {
       maxLat = Math.max(maxLat, lat)
       
       const actType = item.actType || 'unassigned'
-      const typeColorMap: Record<string, string> = {
-        pickup: '#34d399',
-        delivery: '#38bdf8',
-        service: '#a78bfa',
-        replacement: '#a78bfa',
-        unassigned: '#94a3b8',
-      }
-      const typeEmojiMap: Record<string, string> = {
-        pickup: '▲',
-        delivery: '▼',
-        service: '▼',
-        replacement: '◆',
-        unassigned: '✕',
-      }
+      
       unassignedFeatures.push({
         type: 'Feature',
         geometry: { type: 'Point', coordinates: [lng, lat] },
@@ -864,6 +989,16 @@ watch(() => currentSnapshot.value, () => {
   }
 }, { deep: true })
 
+watch(activeTab, (newTab) => {
+  nextTick(() => {
+    if (newTab === 'map') {
+      if (isGeoMode.value) mapboxMapInstance?.resize()
+      else mainMapChart?.resize()
+    } else if (newTab === 'gantt') {
+      ganttChartRef.value?.resize()
+    }
+  })
+})
 
 // Keep fetching updates
 setInterval(() => {
@@ -949,22 +1084,72 @@ setInterval(() => {
                 </div>
               </template>
 
-              <div class="chart-shell" style="position: relative">
-                  <div class="mapbox-token-floater" v-if="(!mapboxToken || !running) && isGeoMode">
-                    <a-input-password
-                      v-model:value="mapboxToken"
-                      placeholder="Mapbox Token (Required for Mapbox)"
-                      size="small"
-                    />
+              <a-tabs v-model:activeKey="activeTab" class="main-tabs" :animated="false">
+                <a-tab-pane key="map" tab="Map View" :forceRender="true">
+                  <div class="chart-shell" style="position: relative">
+                      <div class="mapbox-token-floater" v-if="(!mapboxToken || !running) && isGeoMode">
+                        <a-input-password
+                          v-model:value="mapboxToken"
+                          placeholder="Mapbox Token (Required for Mapbox)"
+                          size="small"
+                        />
+                      </div>
+                      <div v-show="!isGeoMode" ref="mapContainer" class="map-chart"></div>
+                      <div v-show="isGeoMode" ref="mapboxContainer" class="map-chart"></div>
                   </div>
-                  <div v-show="!isGeoMode" ref="mapContainer" class="map-chart"></div>
-                  <div v-show="isGeoMode" ref="mapboxContainer" class="map-chart"></div>
-              </div>
+                </a-tab-pane>
+                <a-tab-pane key="gantt" tab="Gantt Chart" :forceRender="true">
+                  <div class="chart-shell">
+                      <v-chart ref="ganttChartRef" class="map-chart" :option="ganttChartOption" autoresize />
+                  </div>
+                </a-tab-pane>
+                <a-tab-pane key="inspector" tab="Data Inspector">
+                  <div class="chart-shell data-inspector" style="overflow-y: auto; padding: 16px;">
+                      <h3 class="inspector-title">Unassigned Jobs ({{ unassignedData.length }})</h3>
+                      <a-table :dataSource="unassignedData" :columns="unassignedColumns" size="small" :pagination="false" :rowKey="r => r.jobId">
+                        <template #bodyCell="{ column, record }">
+                          <template v-if="column.key === 'jobId'">
+                            <span :style="{ color: typeColorMap[record.actType] ?? '#94a3b8', marginRight: '6px' }">
+                              {{ typeEmojiMap[record.actType] ?? '✕' }}
+                            </span>
+                            {{ record.jobId }}
+                          </template>
+                        </template>
+                      </a-table>
+                      
+                      <h3 class="inspector-title" style="margin-top: 24px;">Vehicle Itineraries</h3>
+                      <a-collapse v-if="currentSnapshot?.tours?.length">
+                        <a-collapse-panel v-for="tour in currentSnapshot.tours" :key="tour.vehicleId" :header="`${tour.vehicleId} (Dist: ${tour.statistic?.distance ?? 'N/A'}, Time: ${fmtSecs(tour.statistic?.duration)})`">
+                          <a-timeline>
+                            <a-timeline-item v-for="(stop, i) in tour.stops" :key="i" :color="getStopColor(stop)">
+                              <span :style="{ color: getStopColor(stop), marginRight: '4px' }">{{ getStopEmoji(stop) }}</span>
+                              <b>{{ stop.activities?.[0]?.jobId || stop.activities?.[0]?.type }}</b>
+                              <span style="color: #94a3b8; margin-left: 8px;">
+                                Arr: {{ new Date(stop.time?.arrival).toLocaleTimeString() }} | Dep: {{ new Date(stop.time?.departure).toLocaleTimeString() }}
+                              </span>
+                            </a-timeline-item>
+                          </a-timeline>
+                        </a-collapse-panel>
+                      </a-collapse>
+                      <a-empty v-else description="No tours available" />
+                  </div>
+                </a-tab-pane>
+              </a-tabs>
 
               <template #extra>
-                <div class="timeline-box">
-                  <a-button :icon="h(StepBackwardOutlined)" @click="jumpToPreviousSolution">Previous</a-button>
-                  <a-button type="primary" :icon="h(StepForwardOutlined)" @click="jumpToNextSolution">Next</a-button>
+                <div class="timeline-box" style="width: 350px; display: flex; align-items: center; gap: 12px; margin-right: 12px;">
+                  <a-button type="text" :icon="isPlaying ? h(PauseCircleOutlined) : h(PlayCircleOutlined)" @click="togglePlay" :disabled="running || runData.history.length <= 1" style="color: #f8fafc" />
+                  <a-slider
+                    v-model:value="currentHistoryIndex"
+                    :min="0"
+                    :max="runData.history.length > 0 ? runData.history.length - 1 : 0"
+                    :disabled="running || runData.history.length <= 1"
+                    :tooltipVisible="false"
+                    style="flex: 1; margin: 0;"
+                  />
+                  <span style="font-size: 12px; color: #94a3b8; width: 50px; text-align: right; user-select: none;">
+                    {{ currentHistoryIndex }} / {{ runData.history.length > 0 ? runData.history.length - 1 : 0 }}
+                  </span>
                 </div>
               </template>
             </a-card>
@@ -1433,5 +1618,60 @@ setInterval(() => {
 .mapbox-token-floater .ant-input {
   background: transparent !important;
   color: #f8fafc;
+}
+
+.main-tabs {
+  height: 650px;
+  display: flex;
+  flex-direction: column;
+}
+
+.main-tabs :deep(.ant-tabs-content) {
+  flex: 1;
+  height: 100%;
+}
+
+.main-tabs :deep(.ant-tabs-tabpane) {
+  height: 100%;
+}
+.main-tabs :deep(.ant-tabs-tabpane.ant-tabs-tabpane-active) {
+  display: flex;
+  flex-direction: column;
+}
+.inspector-title {
+  color: #f8fafc;
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.data-inspector :deep(.ant-table) {
+  background: transparent;
+  color: #e2e8f0;
+}
+.data-inspector :deep(.ant-table-thead > tr > th) {
+  background: rgba(30, 41, 59, 0.8);
+  color: #94a3b8;
+  border-bottom: 1px solid #334155;
+}
+.data-inspector :deep(.ant-table-tbody > tr > td) {
+  border-bottom: 1px solid #334155;
+}
+.data-inspector :deep(.ant-table-tbody > tr:hover > td) {
+  background: rgba(51, 65, 85, 0.5);
+}
+
+.data-inspector :deep(.ant-collapse) {
+  background: transparent;
+  border-color: #334155;
+}
+.data-inspector :deep(.ant-collapse-item) {
+  border-bottom-color: #334155;
+}
+.data-inspector :deep(.ant-collapse-header) {
+  color: #e2e8f0 !important;
+}
+.data-inspector :deep(.ant-timeline-item-content) {
+  color: #e2e8f0;
 }
 </style>
