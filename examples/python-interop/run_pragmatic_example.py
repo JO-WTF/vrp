@@ -11,29 +11,34 @@ sys.path.insert(0, str(PYTHON_INTEROP))
 from vrp_cli import Config, Problem, RoutingMatrix, solve  # noqa: E402
 
 
+def _prefix2(stem: str) -> str:
+    parts = stem.split(".")
+    return ".".join(parts[:2]) if len(parts) >= 2 else stem
+
+
+def _find_related_file(problem_path: Path, suffix: str) -> Path | None:
+    problem_stem = problem_path.stem
+
+    # strict: match by first two segments to avoid cross-example collision
+    prefix2 = _prefix2(problem_stem)
+    candidates = sorted(problem_path.parent.glob(f"{prefix2}*.{suffix}.json"))
+
+    # prefer exact full stem match when present
+    exact = problem_path.with_name(f"{problem_stem}.{suffix}.json")
+    if exact.exists():
+        return exact
+
+    if len(candidates) == 1:
+        return candidates[0]
+
+    return None
+
+
 def find_example_paths(problem_path: Path, matrix_path: Path | None) -> tuple[Path, Path | None]:
     if matrix_path is not None:
         return problem_path, matrix_path
 
-    prefix = problem_path.stem
-    candidate = problem_path.with_name(f"{prefix}.matrix.json")
-    if candidate.exists():
-        return problem_path, candidate
-
-    # fallback for pattern with different extension (e.g., simple.index -> simple.*.matrix.json)
-    candidates = list(problem_path.parent.glob(f"{prefix}*.matrix.json"))
-    if len(candidates) == 1:
-        return problem_path, candidates[0]
-
-    # second fallback: if problem has common prefix (e.g., simple.index -> simple.basic.matrix.json)
-    # search for matrix files that start with the same base prefix
-    if "." in prefix:
-        base_prefix = prefix.split(".")[0]
-        candidates = list(problem_path.parent.glob(f"{base_prefix}*.matrix.json"))
-        if candidates:
-            return problem_path, candidates[0]
-
-    return problem_path, None
+    return problem_path, _find_related_file(problem_path, "matrix")
 
 
 def load_json(path: Path):

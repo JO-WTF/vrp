@@ -27,6 +27,7 @@ if ($PSScriptRoot) {
 }
 
 $VenvPython = Join-Path $RootDir ".venv\Scripts\python.exe"
+$HasUv = [bool](Get-Command uv -ErrorAction SilentlyContinue)
 
 # Determine build profile
 $BuildProfile = if ($Debug) { "debug" } else { "release" }
@@ -39,9 +40,9 @@ Write-Host "Build profile: $BuildProfile"
 Write-Host ""
 
 # Step 0: Check prerequisites
-if (-not (Test-Path $VenvPython)) {
+if (-not $HasUv -and -not (Test-Path $VenvPython)) {
     Write-Host "ERROR: Python virtual environment not found at $VenvPython" -ForegroundColor Red
-    Write-Host "Please create a .venv with: python -m venv .venv" -ForegroundColor Yellow
+    Write-Host "Please create a .venv with: uv venv .venv (or python -m venv .venv)" -ForegroundColor Yellow
     exit 1
 }
 
@@ -91,16 +92,19 @@ if (-not $NoRust) {
 if (-not $NoPython) {
     Write-Host "Step 3: Building Python wheel with maturin..." -ForegroundColor Green
     try {
-        # Check if maturin is available
-        & $VenvPython -m maturin --version 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "  Installing maturin..." -ForegroundColor Cyan
-            & $VenvPython -m pip install "maturin>=1.0" -q
-        }
-        
         Push-Location (Join-Path $RootDir "vrp-cli")
-        $MaturinArgs = @("build", "--release")
-        & $VenvPython -m maturin @MaturinArgs
+        if ($HasUv) {
+            & uv run --python $VenvPython maturin build --release
+        } else {
+            # Check if maturin is available
+            & $VenvPython -m maturin --version 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "  Installing maturin..." -ForegroundColor Cyan
+                & $VenvPython -m pip install "maturin>=1.0" -q
+            }
+            $MaturinArgs = @("build", "--release")
+            & $VenvPython -m maturin @MaturinArgs
+        }
         if ($LASTEXITCODE -ne 0) {
             throw "Maturin build failed with exit code $LASTEXITCODE"
         }
@@ -125,7 +129,11 @@ if (-not $NoPython) {
         $LatestWheel = $Wheels | Sort-Object LastWriteTime -Descending | Select-Object -First 1
         Write-Host "  Installing from: $($LatestWheel.Name)"
         
-        & $VenvPython -m pip install $LatestWheel.FullName --force-reinstall -q
+        if ($HasUv) {
+            & uv pip install --python $VenvPython $LatestWheel.FullName --reinstall -q
+        } else {
+            & $VenvPython -m pip install $LatestWheel.FullName --force-reinstall -q
+        }
         if ($LASTEXITCODE -ne 0) {
             throw "Wheel installation failed with exit code $LASTEXITCODE"
         }
@@ -141,7 +149,11 @@ if (-not $NoPython) {
 # Step 5: Verification
 Write-Host "Step 5: Verifying installation..." -ForegroundColor Green
 try {
-    & $VenvPython -c "import vrp_cli; print(f'vrp_cli module imported successfully'); print([x for x in dir(vrp_cli) if not x.startswith('_')])"
+    if ($HasUv) {
+        & uv run --python $VenvPython python -c "import vrp_cli; print(f'vrp_cli module imported successfully'); print([x for x in dir(vrp_cli) if not x.startswith('_')])"
+    } else {
+        & $VenvPython -c "import vrp_cli; print(f'vrp_cli module imported successfully'); print([x for x in dir(vrp_cli) if not x.startswith('_')])"
+    }
     Write-Host "  Verification successful." -ForegroundColor Green
 }
 catch {

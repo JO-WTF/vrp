@@ -35,7 +35,7 @@ fn run_examples(base_path: &str) {
         ("basics/skills.basic", None),
         ("basics/unassigned.unreachable", None),
         ("simple.basic", None),
-        ("simple.index", Some(vec!["simple.basic.matrix"])),
+        ("simple.basic.index", Some(vec!["simple.basic.matrix"])),
         ("clustering/berlin.vicinity-continue", Some(vec!["clustering/berlin.vicinity-continue.matrix"])),
         ("clustering/berlin.vicinity-return", Some(vec!["clustering/berlin.vicinity-return.matrix"])),
         ("objectives/berlin.default", None),
