@@ -77,14 +77,12 @@ if [ "$NO_PYTHON" != true ]; then
     echo "Step 3: Building Python wheel with maturin..."
 
     cd "$ROOT_DIR/vrp-cli"
+    echo "  Installing Python build dependencies from vrp-cli/requirements.txt..."
     if [ "$USE_UV" = true ]; then
+        uv pip install --python "$ROOT_DIR/.venv/bin/python" -r "$ROOT_DIR/vrp-cli/requirements.txt" -q
         uv run --python "$ROOT_DIR/.venv/bin/python" maturin build --release
     else
-        # Check if maturin is available
-        if ! $VENV_PYTHON -c "import maturin" 2>/dev/null; then
-            echo "  Installing maturin..."
-            $VENV_PYTHON -m pip install "maturin>=1.0" -q
-        fi
+        $VENV_PYTHON -m pip install -r "$ROOT_DIR/vrp-cli/requirements.txt" -q
         $VENV_PYTHON -m maturin build --release
     fi
     echo "  Python wheel build complete."
