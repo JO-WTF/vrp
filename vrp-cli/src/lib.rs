@@ -40,7 +40,7 @@ use std::io::{BufReader, BufWriter};
 use std::sync::Arc;
 use vrp_core::construction::heuristics::InsertionContext;
 use vrp_core::models::Problem as CoreProblem;
-use vrp_core::prelude::{DefaultRandom, Environment, GenericError, Solver};
+use vrp_core::prelude::{GenericError, Solver};
 use vrp_core::solver::IterationCallback;
 use vrp_pragmatic::format::problem::{serialize_problem, PragmaticProblem, Problem};
 use vrp_pragmatic::format::solution::{write_pragmatic, PragmaticOutputType};
@@ -549,13 +549,13 @@ mod py_interop {
                 read_init_solution(
                     BufReader::new(init_solution.as_bytes()),
                     problem.clone(),
-                    Arc::new(DefaultRandom::default()),
+                    Arc::new(vrp_core::prelude::DefaultRandom::default()),
                 )
                 .map(|solution| {
                     vec![InsertionContext::new_from_solution(
                         problem,
                         (solution, None),
-                        Arc::new(Environment::default()),
+                        Arc::new(vrp_core::prelude::Environment::default()),
                     )]
                 })
                 .map_err(|err| format!("cannot read initial solution '{err}'").into())
