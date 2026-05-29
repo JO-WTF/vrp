@@ -18,7 +18,7 @@ type LocationResult = GenericResult<Vec<(String, ApiLocation, usize)>>;
 
 fn can_get_clusters(clusters_fn: fn(&Problem) -> LocationResult) {
     let problem_reader = BufReader::new(
-        File::open("../examples/data/pragmatic/benches/simple.deliveries.100.json").expect("cannot read problem file"),
+        File::open("../examples/data/pragmatic/benches/simple.deliveries.100.problem.json").expect("cannot read problem file"),
     );
 
     let problem = deserialize_problem(problem_reader).unwrap().read_pragmatic().unwrap();

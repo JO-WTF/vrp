@@ -47,21 +47,21 @@ fn solve_problem_with_recreate_cheapest(refinement_ctx: &RefinementContext) -> I
 
 fn bench_init_deliveries_100_benchmark(c: &mut Criterion) {
     c.bench_function("building init solution for a problem with 100 trivial deliveries", |b| {
-        let insertion_ctx = get_refinement_ctx("../../examples/data/pragmatic/benches/simple.deliveries.100.json");
+        let insertion_ctx = get_refinement_ctx("../../examples/data/pragmatic/benches/simple.deliveries.100.problem.json");
         b.iter(|| black_box(solve_problem_with_recreate_cheapest(&insertion_ctx)))
     });
 }
 
 fn bench_init_multi_job_100_benchmark(c: &mut Criterion) {
     c.bench_function("building init solution for a problem with 50 multi jobs", |b| {
-        let insertion_ctx = get_refinement_ctx("../../examples/data/pragmatic/benches/multi-job.100.json");
+        let insertion_ctx = get_refinement_ctx("../../examples/data/pragmatic/benches/multi-job.100.problem.json");
         b.iter(|| black_box(solve_problem_with_recreate_cheapest(&insertion_ctx)))
     });
 }
 
 fn bench_init_reload_100_benchmark(c: &mut Criterion) {
     c.bench_function("building init solution for a problem 100 trivial deliveries and one reload", |b| {
-        let insertion_ctx = get_refinement_ctx("../../examples/data/pragmatic/benches/simple.reload.100.json");
+        let insertion_ctx = get_refinement_ctx("../../examples/data/pragmatic/benches/simple.reload.100.problem.json");
         b.iter(|| black_box(solve_problem_with_recreate_cheapest(&insertion_ctx)))
     });
 }
