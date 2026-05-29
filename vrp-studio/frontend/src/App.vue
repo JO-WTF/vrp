@@ -31,6 +31,7 @@ const heuristicMode = ref<string>('default')
 const isSettingsVisible = ref<boolean>(false)
 const selectedProblem = ref<string | undefined>(undefined)
 const mapboxToken = ref<string>(localStorage.getItem('mapboxToken') || '')
+const useMapboxMode = computed(() => isGeoMode.value && !!mapboxToken.value)
 const activeTab = ref<string>('map')
 
 watch(mapboxToken, (newVal) => {
@@ -489,21 +490,22 @@ const mapChartOption = computed(() => {
   currentStep.tours.forEach((tour: any) => {
     if (tour.stops && tour.stops.length > 0) {
       const loc = tour.stops[0].location
-      if (loc?.lng !== undefined && loc?.lat !== undefined) {
-        isGeo = true
-        isGeoMode.value = true
-      }
+      if (loc?.lng !== undefined && loc?.lat !== undefined) isGeo = true
       else if (loc?.index !== undefined) isIndex = true
     }
   })
 
-  // Since Mapbox GL handles geo-rendering natively now, we bypass ECharts entirely for geo problems.
-  if (isGeo) {
+  isGeoMode.value = isGeo
+
+  // Use Mapbox only when a token is configured. Otherwise, render geo coordinates with ECharts.
+  if (isGeo && mapboxToken.value) {
     return {}
   }
 
   const graphNodes = new Map<string, any>()
   const graphLinks: any[] = []
+  const geoLineSeries: any[] = []
+  const geoScatterData: any[] = []
 
   currentStep.tours.forEach((tour: any) => {
     const color = getVehicleColor(tour.vehicleId)
@@ -597,6 +599,17 @@ const mapChartOption = computed(() => {
         skills: skillsStr,
       }
 
+      if (isGeo && hasGeo) {
+        geoScatterData.push({
+          value: [stop.location.lng, stop.location.lat],
+          name: pointLabel,
+          symbol: shape,
+          symbolSize: size,
+          itemStyle: { color },
+          stopMeta
+        })
+      }
+
       if (isIndex && hasIdx) {
         const nodeId = `loc_${stop.location.index}`
         const isDepot = primaryActivity?.type === 'departure' || primaryActivity?.type === 'arrival' || primaryActivity?.type === 'depot'
@@ -622,7 +635,52 @@ const mapChartOption = computed(() => {
         prevNodeId = nodeId
       }
     })
+
+    if (isGeo) {
+      const coords = tour.stops
+        .map((stop: any) => stop.location)
+        .filter((loc: any) => loc?.lng !== undefined && loc?.lat !== undefined)
+        .map((loc: any) => [loc.lng, loc.lat])
+
+      if (coords.length > 1) {
+        geoLineSeries.push({
+          type: 'line',
+          data: coords,
+          showSymbol: false,
+          lineStyle: { color, width: 2, opacity: 0.8 },
+          emphasis: { lineStyle: { width: 4 } }
+        })
+      }
+    }
   })
+
+  if (isGeo) {
+    series.push(
+      ...geoLineSeries,
+      {
+        type: 'scatter',
+        data: geoScatterData,
+        tooltip: {
+          formatter: (params: any) => {
+            const m = params.data?.stopMeta || {}
+            return [
+              `<b>${m.vehicleId || 'N/A'}</b> · ${m.pointLabel}`,
+              `Type: ${m.actType}`,
+              `Lng/Lat: ${m.lng}, ${m.lat}`,
+              `Arrival: ${m.arrival}`,
+              `Departure: ${m.departure}`,
+              `Actual service: ${m.actualSvc}`,
+              `Planned service: ${m.plannedSvc}`,
+              `Time window: ${m.timeWindows}`,
+              `Skills: ${m.skills}`,
+              `Distance: ${m.distance}`,
+              `Load: ${m.load}`,
+            ].join('<br/>')
+          }
+        }
+      }
+    )
+  }
 
   if (isIndex) {
     series.push({
@@ -667,6 +725,9 @@ const mapChartOption = computed(() => {
     animationDurationUpdate: 300,
     backgroundColor: 'transparent',
     tooltip: { trigger: 'item' },
+    xAxis: isGeo ? { type: 'value', scale: true, name: 'lng', axisLine: { lineStyle: { color: '#64748b' } } } : undefined,
+    yAxis: isGeo ? { type: 'value', scale: true, name: 'lat', axisLine: { lineStyle: { color: '#64748b' } } } : undefined,
+    grid: isGeo ? { left: 48, right: 24, top: 24, bottom: 40 } : undefined,
     series
   }
 
@@ -692,9 +753,9 @@ watch(() => mapChartOption.value, (newOpt) => {
   }
 }, { deep: true })
 
-watch(() => [isGeoMode.value, mapboxToken.value], async ([isGeo, token]) => {
+watch(() => [useMapboxMode.value, mapboxToken.value], async ([useMapbox, token]) => {
   await nextTick()
-  if (isGeo) {
+  if (useMapbox) {
     if (!mapboxMapInstance && token && mapboxContainer.value) {
       mapboxgl.accessToken = token as string
       mapboxMapInstance = new mapboxgl.Map({
@@ -996,7 +1057,7 @@ const updateMapboxData = () => {
 }
 
 watch(() => currentSnapshot.value, () => {
-  if (isGeoMode.value) {
+  if (useMapboxMode.value) {
     updateMapboxData()
   }
 }, { deep: true })
@@ -1004,7 +1065,7 @@ watch(() => currentSnapshot.value, () => {
 watch(activeTab, (newTab) => {
   nextTick(() => {
     if (newTab === 'map') {
-      if (isGeoMode.value) mapboxMapInstance?.resize()
+      if (useMapboxMode.value) mapboxMapInstance?.resize()
       else mainMapChart?.resize()
     } else if (newTab === 'gantt') {
       ganttChartRef.value?.resize()
@@ -1105,8 +1166,8 @@ setInterval(() => {
                           size="small"
                         />
                       </div>
-                      <div v-show="!isGeoMode" ref="mapContainer" class="map-chart"></div>
-                      <div v-show="isGeoMode" ref="mapboxContainer" class="map-chart"></div>
+                      <div v-show="!useMapboxMode" ref="mapContainer" class="map-chart"></div>
+                      <div v-show="useMapboxMode" ref="mapboxContainer" class="map-chart"></div>
                   </div>
                 </a-tab-pane>
                 <a-tab-pane key="gantt" tab="Gantt Chart" :forceRender="true">
