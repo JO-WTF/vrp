@@ -50,11 +50,7 @@ function Install-PythonDeps {
     if ($LASTEXITCODE -ne 0) { throw "Python dependency installation failed with exit code $LASTEXITCODE" }
 }
 
-function Build-Backend {
-    Write-Host "Building and installing local vrp-cli Python bindings..." -ForegroundColor Green
-    & (Join-Path $RootDir "build.ps1") -NoRust
-    if ($LASTEXITCODE -ne 0) { throw "build.ps1 -NoRust failed with exit code $LASTEXITCODE" }
-
+function Install-Backend {
     Write-Host "Installing vrp-studio package in editable mode..." -ForegroundColor Green
     if ($HasUv) {
         & uv pip install --python $VenvPython --no-deps -e $ScriptDir -q
@@ -107,7 +103,7 @@ function Start-Server {
 
 Ensure-Venv
 Install-PythonDeps
-Build-Backend
+Install-Backend
 Build-Frontend
 
 if (-not $NoStart) {

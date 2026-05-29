@@ -5,7 +5,7 @@ VRP Studio 是一个用于展示和调试 VRP 求解过程的可视化服务。
 
 ## 一键编译部署
 
-如果你希望一次性完成后端依赖安装、`vrp-cli` Python 绑定构建、前端构建，并将前端静态资源部署到后端包中，可以在仓库根目录执行：
+如果你已经在仓库根目录成功运行过上层 `build.sh` / `build.ps1`，并希望一次性完成 VRP Studio 后端依赖安装、前端构建，并将前端静态资源部署到后端包中，可以在仓库根目录执行：
 
 ```bash
 ./vrp-studio/deploy.sh
@@ -35,7 +35,7 @@ Windows:
 
 1. 创建或复用仓库根目录下的 `.venv`。
 2. 安装 `vrp-studio/requirements.txt` 中的后端依赖。
-3. 调用仓库根目录的构建脚本安装本地 `vrp-cli` Python 绑定。
+3. 安装 `vrp-studio` 后端包本身（假设上层 `build.sh` / `build.ps1` 已经构建并安装好本地 `vrp-cli` Python 绑定）。
 4. 在 `vrp-studio/frontend` 中执行 `npm ci`/`npm install` 和 `npm run build`。
 5. 将 `vrp-studio/frontend/dist` 复制到 `vrp-studio/vrp_studio/frontend/dist`，供 FastAPI 后端托管。
 

@@ -61,10 +61,7 @@ install_python_deps() {
     fi
 }
 
-build_backend() {
-    echo "Building and installing local vrp-cli Python bindings..."
-    "$ROOT_DIR/build.sh" --no-rust
-
+install_backend() {
     echo "Installing vrp-studio package in editable mode..."
     if [[ "$USE_UV" == true ]]; then
         uv pip install --python "$VENV_PYTHON" --no-deps -e "$SCRIPT_DIR" -q
@@ -109,7 +106,7 @@ start_server() {
 
 ensure_venv
 install_python_deps
-build_backend
+install_backend
 build_frontend
 
 if [[ "$START_SERVER" == true ]]; then
