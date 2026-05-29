@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, h, watch, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import VChart from 'vue-echarts'
-import { PlayCircleOutlined, PauseCircleOutlined, StopOutlined, DollarOutlined, EnvironmentOutlined, FieldTimeOutlined, CarOutlined, DashboardOutlined, InboxOutlined, HourglassOutlined, CoffeeOutlined, UploadOutlined, BookOutlined, UserOutlined, SettingOutlined } from '@ant-design/icons-vue'
+import { PlayCircleOutlined, PauseCircleOutlined, StopOutlined, DollarOutlined, EnvironmentOutlined, FieldTimeOutlined, CarOutlined, DashboardOutlined, InboxOutlined, HourglassOutlined, CoffeeOutlined, UploadOutlined, BookOutlined, UserOutlined, SettingOutlined, ReloadOutlined } from '@ant-design/icons-vue'
 import { theme, message } from 'ant-design-vue'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import mapboxgl from 'mapbox-gl'
@@ -18,6 +18,7 @@ const isGeoMode = ref(false)
 let currentProblemFitted = false
 
 const problems = ref<any[]>([])
+const problemsLoading = ref(false)
 const maxTime = ref<number>(10)
 const maxGen = ref<number>(10000)
 
@@ -50,16 +51,30 @@ const localElapsedSeconds = ref<number>(0)
 let timerInterval: any = null
 let ws: WebSocket | null = null
 
-const fetchProblems = async () => {
+const fetchProblems = async (showSuccess = false) => {
+  problemsLoading.value = true
   try {
     const res = await fetch(getApiUrl('/api/problems'))
     const data = await res.json()
     problems.value = data.problems
-    if (problems.value.length > 0 && !selectedProblem.value) {
+
+    const hasSelectedProblem = problems.value.some(p => p.path === selectedProblem.value)
+    if (problems.value.length > 0 && (!selectedProblem.value || !hasSelectedProblem)) {
       selectedProblem.value = problems.value[0].path
+    } else if (problems.value.length === 0) {
+      selectedProblem.value = undefined
+    }
+
+    if (showSuccess) {
+      message.success('Problem list refreshed')
     }
   } catch (error) {
     console.error('Failed to fetch problems.', error)
+    if (showSuccess) {
+      message.error('Failed to refresh problem list')
+    }
+  } finally {
+    problemsLoading.value = false
   }
 }
 
@@ -1360,10 +1375,6 @@ watch(activeTab, (newTab) => {
   })
 })
 
-// Keep fetching updates
-setInterval(() => {
-  fetchProblems()
-}, 2000)
 </script>
 
 <template>
@@ -1397,6 +1408,7 @@ setInterval(() => {
           placeholder="Select a problem"
           style="min-width: 220px"
           :disabled="running || problems.length === 0"
+          :loading="problemsLoading"
           @change="fetchInitialState"
         >
           <a-select-option v-for="p in problems" :key="p.path" :value="p.path">
@@ -1405,6 +1417,13 @@ setInterval(() => {
             {{ p.name }}
           </a-select-option>
         </a-select>
+        <a-button
+          type="default"
+          :icon="h(ReloadOutlined)"
+          :loading="problemsLoading"
+          :disabled="running"
+          @click="fetchProblems(true)"
+        >Refresh</a-button>
         <a-button type="default" :icon="h(SettingOutlined)" @click="isSettingsVisible = true">Settings</a-button>
         
 
@@ -1517,7 +1536,11 @@ setInterval(() => {
           <a-col :xs="24" :lg="8">
             <div class="right-column" style="display: flex; flex-direction: column; gap: 20px;">
               <a-row :gutter="[12, 12]">
-                <!-- Row 1: Cost + Distance -->
+                <a-col :xs="12">
+                  <a-card class="metric-card" :bordered="false">
+                    <a-statistic :value="currentStats?.unassigned?.length ?? 0" title="Unassigned" :prefix="h(StopOutlined)" />
+                  </a-card>
+                </a-col>
                 <a-col :xs="12">
                   <a-card class="metric-card" :bordered="false">
                     <a-statistic :value="currentStats?.cost?.toFixed(2) ?? 0" title="Cost" :prefix="h(DollarOutlined)" />
@@ -1528,7 +1551,6 @@ setInterval(() => {
                     <a-statistic :value="currentStats?.distance ?? currentStats?.statistic?.distance ?? 0" title="Distance" :prefix="h(EnvironmentOutlined)" />
                   </a-card>
                 </a-col>
-                <!-- Row 2: Duration + Tours -->
                 <a-col :xs="12">
                   <a-card class="metric-card" :bordered="false">
                     <a-statistic :value="currentStats?.duration ?? currentStats?.statistic?.duration ?? 0" title="Duration (s)" :prefix="h(FieldTimeOutlined)" />
@@ -1539,7 +1561,6 @@ setInterval(() => {
                     <a-statistic :value="currentStats?.num_tours ?? currentStats?.tours?.length ?? 0" title="Tours" :prefix="h(CarOutlined)" />
                   </a-card>
                 </a-col>
-                <!-- Row 3: Driving + Serving -->
                 <a-col :xs="12">
                   <a-card class="metric-card" :bordered="false">
                     <a-statistic :value="currentStats?.driving ?? currentStats?.statistic?.times?.driving ?? 0" title="Driving (s)" :prefix="h(DashboardOutlined)" />
@@ -1550,7 +1571,6 @@ setInterval(() => {
                     <a-statistic :value="currentStats?.serving ?? currentStats?.statistic?.times?.serving ?? 0" title="Serving (s)" :prefix="h(InboxOutlined)" />
                   </a-card>
                 </a-col>
-                <!-- Row 4: Waiting + Break -->
                 <a-col :xs="12">
                   <a-card class="metric-card" :bordered="false">
                     <a-statistic :value="currentStats?.waiting ?? currentStats?.statistic?.times?.waiting ?? 0" title="Waiting (s)" :prefix="h(HourglassOutlined)" />
