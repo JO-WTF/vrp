@@ -12,6 +12,7 @@ const mapContainer = ref<HTMLElement | null>(null)
 const mapboxContainer = ref<HTMLElement | null>(null)
 const ganttChartRef = ref<any>(null)
 let mainMapChart: any = null
+let mapResizeObserver: ResizeObserver | null = null
 let mapboxMapInstance: mapboxgl.Map | null = null
 const isGeoMode = ref(false)
 let currentProblemFitted = false
@@ -785,49 +786,67 @@ const mapChartOption = computed(() => {
   }
 })
 
-onMounted(() => {
-  fetchProblems()
-  
-  if (mapContainer.value) {
+const ensureMainMapChart = async () => {
+  await nextTick()
+  if (useMapboxMode.value || !mapContainer.value) return
+
+  if (!mainMapChart) {
     mainMapChart = echarts.init(mapContainer.value)
-    mainMapChart.setOption(mapChartOption.value)
-    const resizeObserver = new ResizeObserver(() => {
+    mapResizeObserver?.disconnect()
+    mapResizeObserver = new ResizeObserver(() => {
       mainMapChart?.resize()
     })
-    resizeObserver.observe(mapContainer.value)
+    mapResizeObserver.observe(mapContainer.value)
   }
+
+  mainMapChart.setOption(mapChartOption.value, true)
+  mainMapChart.resize()
+}
+
+const ensureMapboxMap = async () => {
+  await nextTick()
+  if (!useMapboxMode.value || !mapboxToken.value || !mapboxContainer.value) return
+
+  if (!mapboxMapInstance) {
+    mapboxgl.accessToken = mapboxToken.value
+    mapboxMapInstance = new mapboxgl.Map({
+      container: mapboxContainer.value,
+      style: 'mapbox://styles/mapbox/dark-v11',
+      center: [0, 0],
+      zoom: 2
+    })
+    mapboxMapInstance.on('load', updateMapboxData)
+  } else {
+    mapboxgl.accessToken = mapboxToken.value
+    mapboxMapInstance.resize()
+    updateMapboxData()
+  }
+}
+
+onMounted(() => {
+  fetchProblems()
+  ensureMainMapChart()
 })
 
-watch(() => mapChartOption.value, (newOpt) => {
+watch(() => mapChartOption.value, async (newOpt) => {
+  if (useMapboxMode.value) return
+  await ensureMainMapChart()
   if (mainMapChart && newOpt) {
     mainMapChart.setOption(newOpt, true)
+    mainMapChart.resize()
   }
-}, { deep: true })
+}, { deep: true, flush: 'post' })
 
-watch(() => [useMapboxMode.value, mapboxToken.value], async ([useMapbox, token]) => {
-  await nextTick()
-  if (useMapbox) {
-    if (!mapboxMapInstance && token && mapboxContainer.value) {
-      mapboxgl.accessToken = token as string
-      mapboxMapInstance = new mapboxgl.Map({
-        container: mapboxContainer.value,
-        style: 'mapbox://styles/mapbox/dark-v11',
-        center: [0, 0],
-        zoom: 2
-      })
-      mapboxMapInstance.on('load', updateMapboxData)
-    } else if (mapboxMapInstance) {
-      mapboxMapInstance.resize()
-      if (token) mapboxgl.accessToken = token as string
-    }
-  } else {
-    if (mapContainer.value) {
-      if (mainMapChart) mainMapChart.dispose()
-      mainMapChart = echarts.init(mapContainer.value)
-      mainMapChart.setOption(mapChartOption.value)
-    }
-  }
-})
+watch(() => [runData.value.history.length, currentHistoryIndex.value, activeTab.value, useMapboxMode.value], async () => {
+  if (activeTab.value !== 'map') return
+  if (useMapboxMode.value) await ensureMapboxMap()
+  else await ensureMainMapChart()
+}, { flush: 'post' })
+
+watch(() => [useMapboxMode.value, mapboxToken.value], async ([useMapbox]) => {
+  if (useMapbox) await ensureMapboxMap()
+  else await ensureMainMapChart()
+}, { flush: 'post' })
 
 const updateMapboxData = () => {
   const map = mapboxMapInstance
@@ -1116,8 +1135,8 @@ watch(() => currentSnapshot.value, () => {
 watch(activeTab, (newTab) => {
   nextTick(() => {
     if (newTab === 'map') {
-      if (useMapboxMode.value) mapboxMapInstance?.resize()
-      else mainMapChart?.resize()
+      if (useMapboxMode.value) ensureMapboxMap()
+      else ensureMainMapChart()
     } else if (newTab === 'gantt') {
       ganttChartRef.value?.resize()
     }
@@ -1811,18 +1830,28 @@ setInterval(() => {
   flex-direction: column;
 }
 
-.main-tabs :deep(.ant-tabs-content-holder),
+.main-tabs :deep(.ant-tabs-content-holder) {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+}
+
 .main-tabs :deep(.ant-tabs-content) {
   flex: 1;
   min-height: 0;
   height: 100%;
+  display: flex;
 }
 
 .main-tabs :deep(.ant-tabs-tabpane) {
   height: 100%;
+  min-height: 0;
 }
 .main-tabs :deep(.ant-tabs-tabpane.ant-tabs-tabpane-active) {
   display: flex;
+  flex: 1;
+  min-height: 0;
   flex-direction: column;
 }
 .inspector-title {
