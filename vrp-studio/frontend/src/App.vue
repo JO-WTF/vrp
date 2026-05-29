@@ -42,7 +42,6 @@ watch(mapboxToken, (newVal) => {
 })
 
 const runData = ref<any>({ history: [] })
-const loading = ref(false)
 const running = ref(false)
 const currentHistoryIndex = ref(0)
 const localElapsedSeconds = ref<number>(0)
@@ -290,6 +289,8 @@ const unassignedData = computed(() => {
   }))
 })
 
+const getUnassignedRowKey = (row: { jobId: string }) => row.jobId
+
 const unassignedColumns = [
   { title: 'Job ID', dataIndex: 'jobId', key: 'jobId' },
   { title: 'Reason', dataIndex: 'reason', key: 'reason' }
@@ -482,13 +483,9 @@ const mapChartOption = computed(() => {
   }
 
   const series: any[] = []
-  let hasValidCoords = false
-
   let isGeo = false
   let isIndex = false
   
-  let sumLng = 0, sumLat = 0, ptCount = 0
-
   currentStep.tours.forEach((tour: any) => {
     if (tour.stops && tour.stops.length > 0) {
       const loc = tour.stops[0].location
@@ -510,8 +507,6 @@ const mapChartOption = computed(() => {
 
   currentStep.tours.forEach((tour: any) => {
     const color = getVehicleColor(tour.vehicleId)
-    const coords: [number, number][] = []
-    const scatterData: any[] = []
     let prevNodeId: string | null = null
 
     tour.stops.forEach((stop: any, stopIndex: number) => {
@@ -519,7 +514,6 @@ const mapChartOption = computed(() => {
       const hasIdx = stop.location?.index !== undefined
       if (!hasGeo && !hasIdx) return
       
-      hasValidCoords = true
       const activities = stop.activities || []
       const primaryActivity = activities[0]
       const jobId: string = primaryActivity?.jobId ?? ''
@@ -1123,7 +1117,7 @@ setInterval(() => {
                 <a-tab-pane key="inspector" tab="Data Inspector">
                   <div class="chart-shell data-inspector" style="overflow-y: auto; padding: 16px;">
                       <h3 class="inspector-title">Unassigned Jobs ({{ unassignedData.length }})</h3>
-                      <a-table :dataSource="unassignedData" :columns="unassignedColumns" size="small" :pagination="false" :rowKey="r => r.jobId">
+                      <a-table :dataSource="unassignedData" :columns="unassignedColumns" size="small" :pagination="false" :rowKey="getUnassignedRowKey">
                         <template #bodyCell="{ column, record }">
                           <template v-if="column.key === 'jobId'">
                             <span :style="{ color: typeColorMap[record.actType] ?? '#94a3b8', marginRight: '6px' }">
