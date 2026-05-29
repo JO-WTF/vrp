@@ -7,6 +7,7 @@ import json
 import time
 from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from fastapi import UploadFile, File, Form
@@ -14,6 +15,14 @@ import uvicorn
 from vrp_cli import Problem, Config, RoutingMatrix, solve as vrp_solve
 
 app = FastAPI()
+
+cors_origins = [origin.strip() for origin in os.getenv("VRP_STUDIO_CORS_ORIGINS", "*").split(",") if origin.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins or ["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def find_problems():

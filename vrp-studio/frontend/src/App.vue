@@ -6,6 +6,7 @@ import { PlayCircleOutlined, PauseCircleOutlined, StopOutlined, DollarOutlined, 
 import { theme, message } from 'ant-design-vue'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import mapboxgl from 'mapbox-gl'
+import { getApiUrl, getWsUrl } from './config'
 
 const mapContainer = ref<HTMLElement | null>(null)
 const mapboxContainer = ref<HTMLElement | null>(null)
@@ -50,7 +51,7 @@ let ws: WebSocket | null = null
 
 const fetchProblems = async () => {
   try {
-    const res = await fetch('/api/problems')
+    const res = await fetch(getApiUrl('/api/problems'))
     const data = await res.json()
     problems.value = data.problems
     if (problems.value.length > 0 && !selectedProblem.value) {
@@ -81,8 +82,7 @@ const startSolver = () => {
     localElapsedSeconds.value += 0.1
   }, 100)
   
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  ws = new WebSocket(`${protocol}//${window.location.host}/ws/solve`)
+  ws = new WebSocket(getWsUrl('/ws/solve'))
   
   ws.onopen = () => {
     const p = problems.value.find(p => p.path === selectedProblem.value)
@@ -140,7 +140,7 @@ const fetchInitialState = async (path?: string) => {
   const targetPath = path || selectedProblem.value
   if (!targetPath) return
   try {
-    const res = await fetch('/api/problem/initial_state', {
+    const res = await fetch(getApiUrl('/api/problem/initial_state'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ problem_path: targetPath })
@@ -1039,7 +1039,7 @@ setInterval(() => {
 
       <div class="toolbar">
         <a-upload
-          action="/api/upload"
+          :action="getApiUrl('/api/upload')"
           :showUploadList="false"
           accept=".txt"
           @change="handleUploadChange"
