@@ -239,8 +239,79 @@ const fmtSecs = (s: number | undefined | null): string => {
   return `${sec}s`
 }
 
-const fmtCoord = (v: number | undefined | null): string =>
-  v === undefined || v === null || Number.isNaN(v) ? 'N/A' : Number(v).toFixed(5)
+const fmtCoord = (v: unknown): string => {
+  const n = Number(v)
+  return v === undefined || v === null || Number.isNaN(n) ? 'N/A' : n.toFixed(5)
+}
+
+
+const escapeHtml = (value: unknown): string => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;')
+
+type TimeWindow = [unknown, unknown]
+
+const parseDateValue = (value: unknown): Date | null => {
+  if (value === undefined || value === null || value === '' || value === 'N/A' || value === '—') return null
+  const date = new Date(String(value))
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+const pad2 = (value: number): string => String(value).padStart(2, '0')
+
+const formatDatePart = (date: Date): string =>
+  `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`
+
+const formatTimePart = (date: Date): string => {
+  const base = `${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}`
+  return date.getUTCSeconds() ? `${base}:${pad2(date.getUTCSeconds())}` : base
+}
+
+const formatDateTime = (value: unknown, fallback = 'N/A'): string => {
+  const date = parseDateValue(value)
+  if (!date) return value === undefined || value === null || value === '' ? fallback : String(value)
+  return `${formatDatePart(date)} ${formatTimePart(date)} UTC`
+}
+
+const formatTimeWindow = (window: TimeWindow): string => {
+  const [start, end] = window
+  const startDate = parseDateValue(start)
+  const endDate = parseDateValue(end)
+
+  if (startDate && endDate && formatDatePart(startDate) === formatDatePart(endDate)) {
+    return `${formatDatePart(startDate)} ${formatTimePart(startDate)} – ${formatTimePart(endDate)} UTC`
+  }
+
+  return `${formatDateTime(start, '—')} – ${formatDateTime(end, '—')}`
+}
+
+const formatTimeWindowsHtml = (timeWindows?: TimeWindow[] | null): string => {
+  if (!timeWindows?.length) return '<div class="vrp-tooltip-empty">—</div>'
+
+  return timeWindows
+    .map((window: TimeWindow) => `<div class="vrp-tooltip-tw-row">${escapeHtml(formatTimeWindow(window))}</div>`)
+    .join('')
+}
+
+const formatTimeWindowsText = (timeWindows?: TimeWindow[] | null): string => {
+  if (!timeWindows?.length) return '—'
+  return timeWindows.map(formatTimeWindow).join('; ')
+}
+
+const formatTimeWindowsSection = (timeWindowsHtml: string): string => [
+  '<div class="vrp-tooltip-section vrp-tooltip-time-windows">',
+  '<div class="vrp-tooltip-section-title">Time windows</div>',
+  timeWindowsHtml || '<div class="vrp-tooltip-empty">—</div>',
+  '</div>'
+].join('')
+
+const createTooltipHtml = (lines: string[], timeWindowsHtml: string): string => [
+  ...lines.map(line => `<div>${line}</div>`),
+  formatTimeWindowsSection(timeWindowsHtml),
+].join('')
 
 const colors = ['#8b5cf6', '#38bdf8', '#34d399', '#f59e0b', '#f472b6', '#22d3ee', '#fb7185', '#a78bfa']
 
@@ -343,6 +414,15 @@ const getPrimaryJobPlace = (jobId: unknown, placeIndex = 0) => {
   return meta?.places?.[placeIndex] ?? meta?.places?.[0]
 }
 
+const getJobPlaceForActivity = (jobId: unknown, actType?: string, placeIndex = 0) => {
+  const meta = getJobMeta(jobId)
+  const typePlaces = actType ? meta?.placesByType?.[actType] : undefined
+  return typePlaces?.[placeIndex] ?? typePlaces?.[0] ?? meta?.places?.[placeIndex] ?? meta?.places?.[0]
+}
+
+const getPlaceTimeWindows = (place: any): TimeWindow[] | undefined =>
+  Array.isArray(place?.times) ? place.times as TimeWindow[] : undefined
+
 const getUnassignedLocation = (item: any) => item?.location ?? getPrimaryJobPlace(item?.jobId)?.location
 
 const getUnassignedActType = (item: any) => item?.actType || getJobMeta(item?.jobId)?.type || 'unassigned'
@@ -369,36 +449,65 @@ const formatUnassignedReason = (item: any): string => {
 const createUnassignedMeta = (item: any) => {
   const jobId = item?.jobId || 'Unassigned'
   const jobMeta = getJobMeta(jobId)
-  const place = getPrimaryJobPlace(jobId)
+  const actType = getUnassignedActType(item)
+  const place = getJobPlaceForActivity(jobId, actType)
   const loc = getUnassignedLocation(item)
-  const timeWindows: any[][] | undefined = place?.times
-  const twStr = timeWindows?.length
-    ? timeWindows.map((tw: any[]) => `${tw[0]} – ${tw[1]}`).join(', ')
-    : undefined
+  const timeWindows = getPlaceTimeWindows(place)
 
   return {
     jobId,
     pointLabel: jobId,
-    actType: getUnassignedActType(item),
+    actType,
     reason: formatUnassignedReason(item),
     lat: loc?.lat ?? 'N/A',
     lng: loc?.lng ?? 'N/A',
     index: loc?.index,
     plannedSvc: place?.duration !== undefined ? fmtSecs(place.duration) : '—',
-    timeWindows: twStr ?? '—',
+    timeWindows: formatTimeWindowsText(timeWindows),
+    timeWindowsHtml: formatTimeWindowsHtml(timeWindows),
     skills: formatSkills(jobMeta?.skills),
   }
 }
 
-const formatUnassignedTooltip = (meta: any) => [
-  `<b>Unassigned</b> · ${meta.pointLabel}`,
-  `Type: ${meta.actType}`,
-  `Reason: ${meta.reason}`,
-  `Lat/Lng: ${fmtCoord(meta.lat)}, ${fmtCoord(meta.lng)}`,
-  `Planned service: ${meta.plannedSvc}`,
-  `Time window: ${meta.timeWindows}`,
-  `Skills: ${meta.skills}`,
-].join('<br/>')
+const formatUnassignedTooltip = (meta: any) => createTooltipHtml([
+  `<b>Unassigned</b> · ${escapeHtml(meta.pointLabel)}`,
+  `Type: ${escapeHtml(meta.actType)}`,
+  `Reason: ${escapeHtml(meta.reason)}`,
+  `Lat/Lng: ${escapeHtml(fmtCoord(meta.lat))}, ${escapeHtml(fmtCoord(meta.lng))}`,
+  `Planned service: ${escapeHtml(meta.plannedSvc)}`,
+  `Skills: ${escapeHtml(meta.skills)}`,
+], meta.timeWindowsHtml || '<div class="vrp-tooltip-empty">—</div>')
+
+
+const isTruthyProperty = (value: unknown): boolean => value === true || value === 'true'
+
+const formatMapboxPointTooltip = (properties: any, lat: unknown, lng: unknown): string => {
+  const timeWindowsHtml = properties.timeWindowsHtml || '<div class="vrp-tooltip-empty">—</div>'
+
+  if (isTruthyProperty(properties.isUnassigned)) {
+    return createTooltipHtml([
+      '<b>Unassigned</b>',
+      `Job: ${escapeHtml(properties.id)}`,
+      `Type: ${escapeHtml(properties.type)}`,
+      `Reason: ${escapeHtml(properties.reason)}`,
+      `Planned service: ${escapeHtml(properties.plannedSvc)}`,
+      `Skills: ${escapeHtml(properties.skills)}`,
+    ], timeWindowsHtml)
+  }
+
+  return createTooltipHtml([
+    `<b>${escapeHtml(properties.vehicleId || 'N/A')}</b> · ${escapeHtml(properties.pointLabel)}`,
+    `Type: ${escapeHtml(properties.type)}`,
+    `Lat/Lng: ${escapeHtml(fmtCoord(lat as number))}, ${escapeHtml(fmtCoord(lng as number))}`,
+    `Arrival: ${escapeHtml(properties.arrival)}`,
+    `Departure: ${escapeHtml(properties.departure)}`,
+    `Actual service: ${escapeHtml(properties.actualSvc)}`,
+    `Planned service: ${escapeHtml(properties.plannedSvc)}`,
+    `Skills: ${escapeHtml(properties.skills)}`,
+    `Distance: ${escapeHtml(properties.distance)}`,
+    `Load: ${escapeHtml(properties.load)}`,
+  ], timeWindowsHtml)
+}
 
 const unassignedData = computed(() => {
   if (!currentSnapshot.value?.unassigned) return []
@@ -661,17 +770,13 @@ const mapChartOption = computed(() => {
         return Math.round((dep - arr) / 1000)
       })()
 
-      const jm = jobsMeta.value[jobId]
-      const place0 = jm?.places?.[0]
+      const actType = primaryActivity?.type || 'stop'
+      const jm = getJobMeta(jobId)
+      const place0 = getJobPlaceForActivity(jobId, actType)
       const plannedSvcSecs: number | undefined = place0?.duration
-      const timeWindows: any[][] | undefined = place0?.times
-      const twStr = timeWindows?.length
-        ? timeWindows.map((tw: any[]) => `${tw[0]} – ${tw[1]}`).join(', ')
-        : undefined
+      const timeWindows = getPlaceTimeWindows(place0)
 
       const skillsStr = formatSkills(jm?.skills)
-
-      const actType = primaryActivity?.type || 'stop'
       const isDepot = actType === 'departure' || actType === 'arrival' || actType === 'depot'
       const stopMeta = {
         jobId,
@@ -680,11 +785,12 @@ const mapChartOption = computed(() => {
         vehicleId: tour.vehicleId,
         lat: hasGeo ? stop.location.lat : 'N/A',
         lng: hasGeo ? stop.location.lng : 'N/A',
-        arrival: stop.time?.arrival || 'N/A',
-        departure: stop.time?.departure || 'N/A',
+        arrival: formatDateTime(stop.time?.arrival),
+        departure: formatDateTime(stop.time?.departure),
         actualSvc: actualSvcSecs !== null ? fmtSecs(actualSvcSecs) : 'N/A',
         plannedSvc: plannedSvcSecs !== undefined ? fmtSecs(plannedSvcSecs) : '—',
-        timeWindows: twStr ?? '—',
+        timeWindows: formatTimeWindowsText(timeWindows),
+        timeWindowsHtml: formatTimeWindowsHtml(timeWindows),
         distance: stop.distance ?? 'N/A',
         load: fmtLoad(stop.load),
         skills: skillsStr,
@@ -771,20 +877,18 @@ const mapChartOption = computed(() => {
           tooltip: {
             formatter: (params: any) => {
               const m = params.data?.stopMeta || {}
-              const lines = [
-                `<b>${m.vehicleId}</b> · ${m.pointLabel}`,
-                `Type: ${m.actType}`,
-                `Lat/Lng: ${fmtCoord(m.lat)}, ${fmtCoord(m.lng)}`,
-                `Arrival: ${m.arrival}`,
-                `Departure: ${m.departure}`,
-                `Actual service: ${m.actualSvc}`,
-                `Planned service: ${m.plannedSvc}`,
-                `Time window: ${m.timeWindows}`,
-                `Skills: ${m.skills}`,
-                `Distance: ${m.distance}`,
-                `Load: ${m.load}`,
-              ]
-              return lines.join('<br/>')
+              return createTooltipHtml([
+                `<b>${escapeHtml(m.vehicleId)}</b> · ${escapeHtml(m.pointLabel)}`,
+                `Type: ${escapeHtml(m.actType)}`,
+                `Lat/Lng: ${escapeHtml(fmtCoord(m.lat))}, ${escapeHtml(fmtCoord(m.lng))}`,
+                `Arrival: ${escapeHtml(m.arrival)}`,
+                `Departure: ${escapeHtml(m.departure)}`,
+                `Actual service: ${escapeHtml(m.actualSvc)}`,
+                `Planned service: ${escapeHtml(m.plannedSvc)}`,
+                `Skills: ${escapeHtml(m.skills)}`,
+                `Distance: ${escapeHtml(m.distance)}`,
+                `Load: ${escapeHtml(m.load)}`,
+              ], m.timeWindowsHtml || '<div class="vrp-tooltip-empty">—</div>')
             }
           }
         })
@@ -862,18 +966,17 @@ const mapChartOption = computed(() => {
           if (params.dataType === 'node') {
             const m = params.data?.stopMeta || {}
             if (params.data?.isUnassigned) return formatUnassignedTooltip(m)
-            return [
-              `<b>${m.vehicleId || 'N/A'}</b> · ${m.pointLabel}`,
-              `Type: ${m.actType}`,
-              `Arrival: ${m.arrival}`,
-              `Departure: ${m.departure}`,
-              `Actual service: ${m.actualSvc}`,
-              `Planned service: ${m.plannedSvc}`,
-              `Time window: ${m.timeWindows}`,
-              `Skills: ${m.skills}`,
-              `Distance: ${m.distance}`,
-              `Load: ${m.load}`,
-            ].join('<br/>')
+            return createTooltipHtml([
+              `<b>${escapeHtml(m.vehicleId || 'N/A')}</b> · ${escapeHtml(m.pointLabel)}`,
+              `Type: ${escapeHtml(m.actType)}`,
+              `Arrival: ${escapeHtml(m.arrival)}`,
+              `Departure: ${escapeHtml(m.departure)}`,
+              `Actual service: ${escapeHtml(m.actualSvc)}`,
+              `Planned service: ${escapeHtml(m.plannedSvc)}`,
+              `Skills: ${escapeHtml(m.skills)}`,
+              `Distance: ${escapeHtml(m.distance)}`,
+              `Load: ${escapeHtml(m.load)}`,
+            ], m.timeWindowsHtml || '<div class="vrp-tooltip-empty">—</div>')
           } else if (params.dataType === 'edge') {
             return 'Route segment'
           }
@@ -900,7 +1003,7 @@ const mapChartOption = computed(() => {
       animationDuration: 300,
       animationDurationUpdate: 300,
       backgroundColor: 'transparent',
-      tooltip: { trigger: 'item' },
+      tooltip: { trigger: 'item', confine: true, extraCssText: 'max-width: 360px; white-space: normal;' },
       grid: { left: 16, right: 16, top: 16, bottom: 16, containLabel: false },
       xAxis: {
         type: 'value',
@@ -929,7 +1032,7 @@ const mapChartOption = computed(() => {
     animationDuration: 300,
     animationDurationUpdate: 300,
     backgroundColor: 'transparent',
-    tooltip: { trigger: 'item' },
+    tooltip: { trigger: 'item', confine: true, extraCssText: 'max-width: 360px; white-space: normal;' },
     series
   }
 })
@@ -1044,17 +1147,13 @@ const updateMapboxData = () => {
           return Math.round((dep - arr) / 1000)
         })()
 
-        const jm = jobsMeta.value[jobId]
-        const place0 = jm?.places?.[0]
+        const actType = act?.type || 'stop'
+        const jm = getJobMeta(jobId)
+        const place0 = getJobPlaceForActivity(jobId, actType)
         const plannedSvcSecs: number | undefined = place0?.duration
-        const timeWindows: any[][] | undefined = place0?.times
-        const twStr = timeWindows?.length
-          ? timeWindows.map((tw: any[]) => `${tw[0]} – ${tw[1]}`).join(', ')
-          : undefined
+        const timeWindows = getPlaceTimeWindows(place0)
           
         const skillsStr = formatSkills(jm?.skills)
-        
-        const actType = act?.type || 'stop'
         const typeColor = typeColorMap[actType] ?? color
         const typeEmoji = typeEmojiMap[actType] ?? '●'
         
@@ -1068,12 +1167,13 @@ const updateMapboxData = () => {
             id: jobId,
             pointLabel: pointLabel,
             type: actType,
-            arrival: stop.time?.arrival || 'N/A',
-            departure: stop.time?.departure || 'N/A',
+            arrival: formatDateTime(stop.time?.arrival),
+            departure: formatDateTime(stop.time?.departure),
             vehicleId: tour.vehicleId,
             actualSvc: actualSvcSecs !== null ? fmtSecs(actualSvcSecs) : 'N/A',
             plannedSvc: plannedSvcSecs !== undefined ? fmtSecs(plannedSvcSecs) : '—',
-            timeWindows: twStr ?? '—',
+            timeWindows: formatTimeWindowsText(timeWindows),
+            timeWindowsHtml: formatTimeWindowsHtml(timeWindows),
             distance: stop.distance ?? 'N/A',
             load: fmtLoad(stop.load),
             skills: skillsStr,
@@ -1130,6 +1230,7 @@ const updateMapboxData = () => {
             actualSvc: 'N/A',
             plannedSvc: meta.plannedSvc,
             timeWindows: meta.timeWindows,
+            timeWindowsHtml: meta.timeWindowsHtml,
             distance: 'N/A',
             load: 'N/A',
             skills: meta.skills,
@@ -1180,28 +1281,13 @@ const updateMapboxData = () => {
       }
     })
     
-    const popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false })
+    const popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, maxWidth: '360px' })
     map.on('mouseenter', 'vrp-points-layer', (e: any) => {
         map.getCanvas().style.cursor = 'pointer'
-        const p = e.features[0].properties
-        if (p.isUnassigned) {
-            popup.setLngLat(e.features[0].geometry.coordinates).setHTML(`<b>Unassigned</b><br/>Job: ${p.id}<br/>Type: ${p.type}<br/>Reason: ${p.reason}<br/>Planned service: ${p.plannedSvc}<br/>Time window: ${p.timeWindows}<br/>Skills: ${p.skills}`).addTo(map)
-        } else {
-            const html = [
-                `<b>${p.vehicleId || 'N/A'}</b> · ${p.pointLabel}`,
-                `Type: ${p.type}`,
-                `Lat/Lng: ${fmtCoord(e.features[0].geometry.coordinates[1])}, ${fmtCoord(e.features[0].geometry.coordinates[0])}`,
-                `Arrival: ${p.arrival}`,
-                `Departure: ${p.departure}`,
-                `Actual service: ${p.actualSvc}`,
-                `Planned service: ${p.plannedSvc}`,
-                `Time window: ${p.timeWindows}`,
-                `Skills: ${p.skills}`,
-                `Distance: ${p.distance}`,
-                `Load: ${p.load}`
-            ].join('<br/>')
-            popup.setLngLat(e.features[0].geometry.coordinates).setHTML(html).addTo(map)
-        }
+        const feature = e.features[0]
+        const properties = feature.properties
+        const [lng, lat] = feature.geometry.coordinates
+        popup.setLngLat(feature.geometry.coordinates).setHTML(formatMapboxPointTooltip(properties, lat, lng)).addTo(map)
     })
     map.on('mouseleave', 'vrp-points-layer', () => {
         map.getCanvas().style.cursor = ''
@@ -1211,25 +1297,8 @@ const updateMapboxData = () => {
     // Mirror hover on the emoji symbol layer (it sits on top of the circles)
     const showPointPopup = (e: any) => {
         map.getCanvas().style.cursor = 'pointer'
-        const p = e.features[0].properties
-        if (p.isUnassigned) {
-            popup.setLngLat(e.lngLat).setHTML(`<b>Unassigned</b><br/>Job: ${p.id}<br/>Type: ${p.type}<br/>Reason: ${p.reason}<br/>Planned service: ${p.plannedSvc}<br/>Time window: ${p.timeWindows}<br/>Skills: ${p.skills}`).addTo(map)
-        } else {
-            const html = [
-                `<b>${p.vehicleId || 'N/A'}</b> · ${p.pointLabel}`,
-                `Type: ${p.type}`,
-                `Lat/Lng: ${fmtCoord(e.lngLat.lat)}, ${fmtCoord(e.lngLat.lng)}`,
-                `Arrival: ${p.arrival}`,
-                `Departure: ${p.departure}`,
-                `Actual service: ${p.actualSvc}`,
-                `Planned service: ${p.plannedSvc}`,
-                `Time window: ${p.timeWindows}`,
-                `Skills: ${p.skills}`,
-                `Distance: ${p.distance}`,
-                `Load: ${p.load}`
-            ].join('<br/>')
-            popup.setLngLat(e.lngLat).setHTML(html).addTo(map)
-        }
+        const properties = e.features[0].properties
+        popup.setLngLat(e.lngLat).setHTML(formatMapboxPointTooltip(properties, e.lngLat.lat, e.lngLat.lng)).addTo(map)
     }
     map.on('mouseenter', 'vrp-labels-layer', showPointPopup)
     map.on('mouseleave', 'vrp-labels-layer', () => {
@@ -2031,4 +2100,35 @@ setInterval(() => {
 .data-inspector :deep(.ant-timeline-item-content) {
   color: #e2e8f0;
 }
+
+:global(.vrp-tooltip-section) {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+:global(.vrp-tooltip-section-title) {
+  margin-bottom: 4px;
+  color: #cbd5e1;
+  font-weight: 700;
+}
+
+:global(.vrp-tooltip-tw-row) {
+  display: block;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #e2e8f0;
+}
+
+:global(.vrp-tooltip-empty) {
+  color: #94a3b8;
+}
+
+:global(.mapboxgl-popup-content) {
+  max-width: 360px;
+  white-space: normal;
+}
+
 </style>
