@@ -1536,7 +1536,11 @@ watch(activeTab, (newTab) => {
           <a-col :xs="24" :lg="8">
             <div class="right-column" style="display: flex; flex-direction: column; gap: 20px;">
               <a-row :gutter="[12, 12]">
-                <!-- Row 1: Cost + Distance -->
+                <a-col :xs="12">
+                  <a-card class="metric-card" :bordered="false">
+                    <a-statistic :value="currentStats?.unassigned?.length ?? 0" title="Unassigned" :prefix="h(StopOutlined)" />
+                  </a-card>
+                </a-col>
                 <a-col :xs="12">
                   <a-card class="metric-card" :bordered="false">
                     <a-statistic :value="currentStats?.cost?.toFixed(2) ?? 0" title="Cost" :prefix="h(DollarOutlined)" />
@@ -1547,7 +1551,6 @@ watch(activeTab, (newTab) => {
                     <a-statistic :value="currentStats?.distance ?? currentStats?.statistic?.distance ?? 0" title="Distance" :prefix="h(EnvironmentOutlined)" />
                   </a-card>
                 </a-col>
-                <!-- Row 2: Duration + Tours -->
                 <a-col :xs="12">
                   <a-card class="metric-card" :bordered="false">
                     <a-statistic :value="currentStats?.duration ?? currentStats?.statistic?.duration ?? 0" title="Duration (s)" :prefix="h(FieldTimeOutlined)" />
@@ -1558,7 +1561,6 @@ watch(activeTab, (newTab) => {
                     <a-statistic :value="currentStats?.num_tours ?? currentStats?.tours?.length ?? 0" title="Tours" :prefix="h(CarOutlined)" />
                   </a-card>
                 </a-col>
-                <!-- Row 3: Driving + Serving -->
                 <a-col :xs="12">
                   <a-card class="metric-card" :bordered="false">
                     <a-statistic :value="currentStats?.driving ?? currentStats?.statistic?.times?.driving ?? 0" title="Driving (s)" :prefix="h(DashboardOutlined)" />
@@ -1569,7 +1571,6 @@ watch(activeTab, (newTab) => {
                     <a-statistic :value="currentStats?.serving ?? currentStats?.statistic?.times?.serving ?? 0" title="Serving (s)" :prefix="h(InboxOutlined)" />
                   </a-card>
                 </a-col>
-                <!-- Row 4: Waiting + Break -->
                 <a-col :xs="12">
                   <a-card class="metric-card" :bordered="false">
                     <a-statistic :value="currentStats?.waiting ?? currentStats?.statistic?.times?.waiting ?? 0" title="Waiting (s)" :prefix="h(HourglassOutlined)" />
