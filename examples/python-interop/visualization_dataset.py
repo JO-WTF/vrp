@@ -6,7 +6,7 @@ from vrp_cli.vis import SolveTracker
 def run() -> None:
     # 1. Load an existing pragmatic dataset from examples/data
     repo_root = Path(__file__).resolve().parents[2]
-    problem_path = repo_root / "examples" / "data" / "pragmatic" / "benches" / "simple.deliveries.100.json"
+    problem_path = repo_root / "examples" / "data" / "pragmatic" / "benches" / "simple.deliveries.100.problem.json"
     
     print(f"Loading problem from {problem_path}...")
     problem = Problem.from_json(problem_path)

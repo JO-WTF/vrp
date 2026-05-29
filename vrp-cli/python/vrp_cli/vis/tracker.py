@@ -19,18 +19,30 @@ def _extract_jobs_meta(problem: Any) -> Dict[str, Any]:
 
     jobs_meta: Dict[str, Any] = {}
 
+    task_types = {
+        "deliveries": "delivery",
+        "pickups": "pickup",
+        "services": "service",
+        "replacements": "replacement",
+    }
+
     for job in d.get("plan", {}).get("jobs", []):
         job_id = job.get("id")
         if not job_id:
             continue
 
-        meta: Dict[str, Any] = {"type": None, "places": []}
+        meta: Dict[str, Any] = {"type": None, "places": [], "placesByType": {}}
 
         for task_key in ("deliveries", "pickups", "services", "replacements"):
             tasks = job.get(task_key, [])
             if not tasks:
                 continue
-            meta["type"] = task_key.rstrip("s")  # delivery / pickup / service …
+
+            task_type = task_types[task_key]
+            if meta["type"] is None:
+                meta["type"] = task_type
+
+            typed_places: List[Dict[str, Any]] = []
             for task in tasks:
                 place: Dict[str, Any] = {}
                 loc = task.get("places", [{}])[0] if task.get("places") else {}
@@ -40,8 +52,10 @@ def _extract_jobs_meta(problem: Any) -> Dict[str, Any]:
                 demand = task.get("demand")
                 if demand is not None:
                     place["demand"] = demand
+                typed_places.append(place)
                 meta["places"].append(place)
-            break  # only first task type
+
+            meta["placesByType"][task_type] = typed_places
 
         # skills / priority / value
         if job.get("skills"):

@@ -6,11 +6,13 @@ import { PlayCircleOutlined, PauseCircleOutlined, StopOutlined, DollarOutlined, 
 import { theme, message } from 'ant-design-vue'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import mapboxgl from 'mapbox-gl'
+import { getApiUrl, getWsUrl } from './config'
 
 const mapContainer = ref<HTMLElement | null>(null)
 const mapboxContainer = ref<HTMLElement | null>(null)
 const ganttChartRef = ref<any>(null)
 let mainMapChart: any = null
+let mapResizeObserver: ResizeObserver | null = null
 let mapboxMapInstance: mapboxgl.Map | null = null
 const isGeoMode = ref(false)
 let currentProblemFitted = false
@@ -30,6 +32,7 @@ const heuristicMode = ref<string>('default')
 const isSettingsVisible = ref<boolean>(false)
 const selectedProblem = ref<string | undefined>(undefined)
 const mapboxToken = ref<string>(localStorage.getItem('mapboxToken') || '')
+const useMapboxMode = computed(() => isGeoMode.value && !!mapboxToken.value)
 const activeTab = ref<string>('map')
 
 watch(mapboxToken, (newVal) => {
@@ -41,7 +44,6 @@ watch(mapboxToken, (newVal) => {
 })
 
 const runData = ref<any>({ history: [] })
-const loading = ref(false)
 const running = ref(false)
 const currentHistoryIndex = ref(0)
 const localElapsedSeconds = ref<number>(0)
@@ -50,7 +52,7 @@ let ws: WebSocket | null = null
 
 const fetchProblems = async () => {
   try {
-    const res = await fetch('/api/problems')
+    const res = await fetch(getApiUrl('/api/problems'))
     const data = await res.json()
     problems.value = data.problems
     if (problems.value.length > 0 && !selectedProblem.value) {
@@ -81,8 +83,7 @@ const startSolver = () => {
     localElapsedSeconds.value += 0.1
   }, 100)
   
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  ws = new WebSocket(`${protocol}//${window.location.host}/ws/solve`)
+  ws = new WebSocket(getWsUrl('/ws/solve'))
   
   ws.onopen = () => {
     const p = problems.value.find(p => p.path === selectedProblem.value)
@@ -140,7 +141,7 @@ const fetchInitialState = async (path?: string) => {
   const targetPath = path || selectedProblem.value
   if (!targetPath) return
   try {
-    const res = await fetch('/api/problem/initial_state', {
+    const res = await fetch(getApiUrl('/api/problem/initial_state'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ problem_path: targetPath })
@@ -238,8 +239,86 @@ const fmtSecs = (s: number | undefined | null): string => {
   return `${sec}s`
 }
 
-const fmtCoord = (v: number | undefined | null): string =>
-  v === undefined || v === null || Number.isNaN(v) ? 'N/A' : Number(v).toFixed(5)
+const fmtCoord = (v: unknown): string => {
+  const n = Number(v)
+  return v === undefined || v === null || Number.isNaN(n) ? 'N/A' : n.toFixed(5)
+}
+
+
+const escapeHtml = (value: unknown): string => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;')
+
+type TimeWindow = [unknown, unknown]
+
+const parseDateValue = (value: unknown): Date | null => {
+  if (value === undefined || value === null || value === '' || value === 'N/A' || value === '—') return null
+  const date = new Date(String(value))
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+const pad2 = (value: number): string => String(value).padStart(2, '0')
+
+const formatDatePart = (date: Date): string =>
+  `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`
+
+const formatTimePart = (date: Date): string => {
+  const base = `${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}`
+  return date.getUTCSeconds() ? `${base}:${pad2(date.getUTCSeconds())}` : base
+}
+
+const formatDateTime = (value: unknown, fallback = 'N/A'): string => {
+  const date = parseDateValue(value)
+  if (!date) return value === undefined || value === null || value === '' ? fallback : String(value)
+  return `${formatDatePart(date)} ${formatTimePart(date)} UTC`
+}
+
+const formatTimeWindow = (window: TimeWindow): string => {
+  const [start, end] = window
+  const startDate = parseDateValue(start)
+  const endDate = parseDateValue(end)
+
+  if (startDate && endDate && formatDatePart(startDate) === formatDatePart(endDate)) {
+    return `${formatDatePart(startDate)} ${formatTimePart(startDate)} – ${formatTimePart(endDate)} UTC`
+  }
+
+  return `${formatDateTime(start, '—')} – ${formatDateTime(end, '—')}`
+}
+
+const formatTimeWindowsHtml = (timeWindows?: TimeWindow[] | null): string => {
+  if (!timeWindows?.length) return '<div class="vrp-tooltip-empty">—</div>'
+
+  return timeWindows
+    .map((window: TimeWindow) => `<div class="vrp-tooltip-tw-row">${escapeHtml(formatTimeWindow(window))}</div>`)
+    .join('')
+}
+
+const formatTimeWindowsText = (timeWindows?: TimeWindow[] | null): string => {
+  if (!timeWindows?.length) return '—'
+  return timeWindows.map(formatTimeWindow).join('; ')
+}
+
+const formatTimeWindowsSection = (timeWindowsHtml: string): string => [
+  '<div class="vrp-tooltip-section vrp-tooltip-time-windows">',
+  '<div class="vrp-tooltip-section-title">Time windows</div>',
+  timeWindowsHtml || '<div class="vrp-tooltip-empty">—</div>',
+  '</div>'
+].join('')
+
+const createTooltipHtml = (lines: string[], timeWindowsHtml: string): string => [
+  ...lines.map(line => `<div>${line}</div>`),
+  formatTimeWindowsSection(timeWindowsHtml),
+].join('')
+
+const darkChartTooltipStyle = {
+  backgroundColor: 'rgba(15, 23, 42, 0.95)',
+  borderColor: 'rgba(99, 102, 241, 0.35)',
+  textStyle: { color: '#f8fafc' },
+  extraCssText: 'max-width: 360px; white-space: normal; color: #f8fafc;'
+}
 
 const colors = ['#8b5cf6', '#38bdf8', '#34d399', '#f59e0b', '#f472b6', '#22d3ee', '#fb7185', '#a78bfa']
 
@@ -271,14 +350,165 @@ const typeEmojiMap: Record<string, string> = {
   unassigned: '✕',
 }
 
+
+// ECharts draws built-in symbols as filled vector shapes. Keep job type
+// distinction in the symbol itself instead of overlaying unicode emoji labels:
+// overlay text is font-dependent and made some markers look hollow or partially
+// filled (notably the pickup triangle).
+const typeSymbolMap: Record<string, string> = {
+  departure: 'rect',
+  arrival: 'rect',
+  depot: 'rect',
+  pickup: 'triangle',
+  delivery: 'triangle',
+  recharge: 'diamond',
+  break: 'roundRect',
+  service: 'triangle',
+  stop: 'circle',
+  replacement: 'diamond',
+  unassigned: 'path://M-6,-6 L-2,-6 L0,-2 L2,-6 L6,-6 L2,0 L6,6 L2,6 L0,2 L-2,6 L-6,6 L-2,0 Z',
+}
+
+const typeSymbolRotateMap: Record<string, number> = {
+  delivery: 180,
+  service: 180,
+}
+
+const getTypeColor = (actType: string, fallback = '#38bdf8') => typeColorMap[actType] ?? fallback
+
+const getTypeEmoji = (actType: string, fallback = '●') => typeEmojiMap[actType] ?? fallback
+
+const getEChartPointStyle = (actType: string, vehicleColor: string, symbolSize = 12) => ({
+  symbol: typeSymbolMap[actType] ?? 'circle',
+  symbolRotate: typeSymbolRotateMap[actType] ?? 0,
+  symbolSize,
+  itemStyle: {
+    color: getTypeColor(actType),
+    borderColor: vehicleColor,
+    borderWidth: 2,
+  },
+})
+
+const getEChartDataPointStyle = (actType: string, vehicleColor: string, symbolSize = 12) => ({
+  ...getEChartPointStyle(actType, vehicleColor, symbolSize),
+})
+
 const getStopColor = (stop: any) => {
   const t = stop.activities?.[0]?.type || 'stop'
-  return typeColorMap[t] || '#38bdf8'
+  return getTypeColor(t)
 }
 
 const getStopEmoji = (stop: any) => {
   const t = stop.activities?.[0]?.type || 'stop'
-  return typeEmojiMap[t] || '●'
+  return getTypeEmoji(t)
+}
+
+
+const getBaseJobId = (jobId: unknown): string => {
+  const value = String(jobId ?? '')
+  return value.includes('/') ? value.split('/')[0] : value
+}
+
+const getJobMeta = (jobId: unknown) => jobsMeta.value[String(jobId ?? '')] ?? jobsMeta.value[getBaseJobId(jobId)]
+
+const getPrimaryJobPlace = (jobId: unknown, placeIndex = 0) => {
+  const meta = getJobMeta(jobId)
+  return meta?.places?.[placeIndex] ?? meta?.places?.[0]
+}
+
+const getJobPlaceForActivity = (jobId: unknown, actType?: string, placeIndex = 0) => {
+  const meta = getJobMeta(jobId)
+  const typePlaces = actType ? meta?.placesByType?.[actType] : undefined
+  return typePlaces?.[placeIndex] ?? typePlaces?.[0] ?? meta?.places?.[placeIndex] ?? meta?.places?.[0]
+}
+
+const getPlaceTimeWindows = (place: any): TimeWindow[] | undefined =>
+  Array.isArray(place?.times) ? place.times as TimeWindow[] : undefined
+
+const getUnassignedLocation = (item: any) => item?.location ?? getPrimaryJobPlace(item?.jobId)?.location
+
+const getUnassignedActType = (item: any) => item?.actType || getJobMeta(item?.jobId)?.type || 'unassigned'
+
+const formatSkills = (skillsObj: any): string => {
+  if (!skillsObj) return '—'
+  const parts = []
+  if (skillsObj.allOf?.length) parts.push(`All: ${skillsObj.allOf.join(', ')}`)
+  if (skillsObj.anyOf?.length) parts.push(`Any: ${skillsObj.anyOf.join(', ')}`)
+  if (skillsObj.noneOf?.length) parts.push(`None: ${skillsObj.noneOf.join(', ')}`)
+  return parts.length ? parts.join(' | ') : '—'
+}
+
+const formatUnassignedReason = (item: any): string => {
+  if (item?.reason) return String(item.reason)
+  if (Array.isArray(item?.reasons) && item.reasons.length) {
+    return item.reasons
+      .map((reason: any) => typeof reason === 'string' ? reason : reason?.description || reason?.code || JSON.stringify(reason))
+      .join(', ')
+  }
+  return 'Unassigned'
+}
+
+const createUnassignedMeta = (item: any) => {
+  const jobId = item?.jobId || 'Unassigned'
+  const jobMeta = getJobMeta(jobId)
+  const actType = getUnassignedActType(item)
+  const place = getJobPlaceForActivity(jobId, actType)
+  const loc = getUnassignedLocation(item)
+  const timeWindows = getPlaceTimeWindows(place)
+
+  return {
+    jobId,
+    pointLabel: jobId,
+    actType,
+    reason: formatUnassignedReason(item),
+    lat: loc?.lat ?? 'N/A',
+    lng: loc?.lng ?? 'N/A',
+    index: loc?.index,
+    plannedSvc: place?.duration !== undefined ? fmtSecs(place.duration) : '—',
+    timeWindows: formatTimeWindowsText(timeWindows),
+    timeWindowsHtml: formatTimeWindowsHtml(timeWindows),
+    skills: formatSkills(jobMeta?.skills),
+  }
+}
+
+const formatUnassignedTooltip = (meta: any) => createTooltipHtml([
+  `<b>Unassigned</b> · ${escapeHtml(meta.pointLabel)}`,
+  `Type: ${escapeHtml(meta.actType)}`,
+  `Reason: ${escapeHtml(meta.reason)}`,
+  `Lat/Lng: ${escapeHtml(fmtCoord(meta.lat))}, ${escapeHtml(fmtCoord(meta.lng))}`,
+  `Planned service: ${escapeHtml(meta.plannedSvc)}`,
+  `Skills: ${escapeHtml(meta.skills)}`,
+], meta.timeWindowsHtml || '<div class="vrp-tooltip-empty">—</div>')
+
+
+const isTruthyProperty = (value: unknown): boolean => value === true || value === 'true'
+
+const formatMapboxPointTooltip = (properties: any, lat: unknown, lng: unknown): string => {
+  const timeWindowsHtml = properties.timeWindowsHtml || '<div class="vrp-tooltip-empty">—</div>'
+
+  if (isTruthyProperty(properties.isUnassigned)) {
+    return createTooltipHtml([
+      '<b>Unassigned</b>',
+      `Job: ${escapeHtml(properties.id)}`,
+      `Type: ${escapeHtml(properties.type)}`,
+      `Reason: ${escapeHtml(properties.reason)}`,
+      `Planned service: ${escapeHtml(properties.plannedSvc)}`,
+      `Skills: ${escapeHtml(properties.skills)}`,
+    ], timeWindowsHtml)
+  }
+
+  return createTooltipHtml([
+    `<b>${escapeHtml(properties.vehicleId || 'N/A')}</b> · ${escapeHtml(properties.pointLabel)}`,
+    `Type: ${escapeHtml(properties.type)}`,
+    `Lat/Lng: ${escapeHtml(fmtCoord(lat as number))}, ${escapeHtml(fmtCoord(lng as number))}`,
+    `Arrival: ${escapeHtml(properties.arrival)}`,
+    `Departure: ${escapeHtml(properties.departure)}`,
+    `Actual service: ${escapeHtml(properties.actualSvc)}`,
+    `Planned service: ${escapeHtml(properties.plannedSvc)}`,
+    `Skills: ${escapeHtml(properties.skills)}`,
+    `Distance: ${escapeHtml(properties.distance)}`,
+    `Load: ${escapeHtml(properties.load)}`,
+  ], timeWindowsHtml)
 }
 
 const unassignedData = computed(() => {
@@ -286,9 +516,11 @@ const unassignedData = computed(() => {
   return currentSnapshot.value.unassigned.map((item: any) => ({
     jobId: item.jobId,
     actType: item.actType || 'unassigned',
-    reason: item.reason || 'No specific reason provided'
+    reason: formatUnassignedReason(item)
   }))
 })
+
+const getUnassignedRowKey = (row: { jobId: string }) => row.jobId
 
 const unassignedColumns = [
   { title: 'Job ID', dataIndex: 'jobId', key: 'jobId' },
@@ -310,9 +542,7 @@ const convergenceChartOption = computed(() => {
     backgroundColor: 'transparent',
     tooltip: {
       trigger: 'axis',
-      backgroundColor: 'rgba(15, 23, 42, 0.95)',
-      borderColor: 'rgba(99, 102, 241, 0.35)',
-      textStyle: { color: '#f8fafc' }
+      ...darkChartTooltipStyle
     },
     grid: { left: 24, right: 12, top: 12, bottom: 32 },
     xAxis: {
@@ -406,16 +636,20 @@ const ganttChartOption = computed(() => {
     tooltip: {
       formatter: (params: any) => {
         const d = params.value
-        return `<b>${params.name}</b><br/>Type: ${d[3]}<br/>Arrival: ${new Date(d[1]).toLocaleTimeString()}<br/>Departure: ${new Date(d[2]).toLocaleTimeString()}`
+        return [
+          `<b>${escapeHtml(params.name)}</b>`,
+          `Type: ${escapeHtml(d[3])}`,
+          `Arrival: ${escapeHtml(formatDateTime(d[1]))}`,
+          `Departure: ${escapeHtml(formatDateTime(d[2]))}`,
+        ].join('<br/>')
       },
-      backgroundColor: 'rgba(15, 23, 42, 0.9)',
-      textStyle: { color: '#f8fafc' }
+      ...darkChartTooltipStyle
     },
     grid: { left: 80, right: 20, top: 20, bottom: 40 },
     xAxis: {
       type: 'time',
       axisLine: { lineStyle: { color: '#334155' } },
-      axisLabel: { color: '#94a3b8' },
+      axisLabel: { color: '#94a3b8', formatter: (value: unknown) => formatDateTime(value) },
       splitLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.12)' } }
     },
     yAxis: {
@@ -469,7 +703,9 @@ const mapChartOption = computed(() => {
   if (!runData.value?.history?.length || !currentSnapshot.value) return {}
 
   const currentStep = currentSnapshot.value
-  if (!currentStep?.tours) {
+  const tours = currentStep?.tours ?? []
+  const unassignedJobs = currentStep?.unassigned ?? []
+  if (!tours.length && !unassignedJobs.length) {
     return {
       backgroundColor: 'transparent',
       title: {
@@ -481,34 +717,36 @@ const mapChartOption = computed(() => {
     }
   }
 
-  const series: any[] = []
-  let hasValidCoords = false
-
   let isGeo = false
   let isIndex = false
-  
-  let sumLng = 0, sumLat = 0, ptCount = 0
 
-  currentStep.tours.forEach((tour: any) => {
+  tours.forEach((tour: any) => {
     if (tour.stops && tour.stops.length > 0) {
       const loc = tour.stops[0].location
-      if (loc?.lng !== undefined && loc?.lat !== undefined) {
-        isGeo = true
-        isGeoMode.value = true
-      }
+      if (loc?.lng !== undefined && loc?.lat !== undefined) isGeo = true
       else if (loc?.index !== undefined) isIndex = true
     }
   })
 
-  // Since Mapbox GL handles geo-rendering natively now, we bypass ECharts entirely for geo problems.
-  if (isGeo) {
+  unassignedJobs.forEach((item: any) => {
+    const loc = getUnassignedLocation(item)
+    if (loc?.lng !== undefined && loc?.lat !== undefined) isGeo = true
+    else if (loc?.index !== undefined) isIndex = true
+  })
+
+  isGeoMode.value = isGeo
+
+  // Use Mapbox only when a token is configured. Otherwise, keep the old ECharts coordinate view.
+  if (isGeo && mapboxToken.value) {
     return {}
   }
 
+  const series: any[] = []
+  let hasValidCoords = false
   const graphNodes = new Map<string, any>()
   const graphLinks: any[] = []
 
-  currentStep.tours.forEach((tour: any) => {
+  tours.forEach((tour: any) => {
     const color = getVehicleColor(tour.vehicleId)
     const coords: [number, number][] = []
     const scatterData: any[] = []
@@ -518,8 +756,7 @@ const mapChartOption = computed(() => {
       const hasGeo = stop.location?.lng !== undefined && stop.location?.lat !== undefined
       const hasIdx = stop.location?.index !== undefined
       if (!hasGeo && !hasIdx) return
-      
-      hasValidCoords = true
+
       const activities = stop.activities || []
       const primaryActivity = activities[0]
       const jobId: string = primaryActivity?.jobId ?? ''
@@ -537,87 +774,58 @@ const mapChartOption = computed(() => {
         return Math.round((dep - arr) / 1000)
       })()
 
-      const jm = jobsMeta.value[jobId]
-      const place0 = jm?.places?.[0]
+      const actType = primaryActivity?.type || 'stop'
+      const jm = getJobMeta(jobId)
+      const place0 = getJobPlaceForActivity(jobId, actType)
       const plannedSvcSecs: number | undefined = place0?.duration
-      const timeWindows: any[][] | undefined = place0?.times
-      const twStr = timeWindows?.length
-        ? timeWindows.map((tw: any[]) => `${tw[0]} – ${tw[1]}`).join(', ')
-        : undefined
-        
-      const skillsObj = jm?.skills
-      let skillsStr = '—'
-      if (skillsObj) {
-         const parts = []
-         if (skillsObj.allOf?.length) parts.push(`All: ${skillsObj.allOf.join(', ')}`)
-         if (skillsObj.anyOf?.length) parts.push(`Any: ${skillsObj.anyOf.join(', ')}`)
-         if (skillsObj.noneOf?.length) parts.push(`None: ${skillsObj.noneOf.join(', ')}`)
-         if (parts.length) skillsStr = parts.join(' | ')
-      }
-      
-      let shape = 'circle'
-      let size = 8
-      switch (primaryActivity?.type) {
-        case 'departure':
-        case 'arrival':
-        case 'depot':
-          shape = 'rect'
-          size = 12
-          break
-        case 'pickup':
-          shape = 'triangle'
-          size = 10
-          break
-        case 'delivery':
-          shape = 'circle'
-          size = 8
-          break
-        case 'recharge':
-          shape = 'diamond'
-          size = 12
-          break
-        case 'break':
-          shape = 'roundRect'
-          size = 10
-          break
-        default:
-          shape = 'circle'
-          size = 8
-          break
-      }
-      
+      const timeWindows = getPlaceTimeWindows(place0)
+
+      const skillsStr = formatSkills(jm?.skills)
+      const isDepot = actType === 'departure' || actType === 'arrival' || actType === 'depot'
       const stopMeta = {
         jobId,
         pointLabel,
-        actType: primaryActivity?.type || 'stop',
+        actType,
         vehicleId: tour.vehicleId,
         lat: hasGeo ? stop.location.lat : 'N/A',
         lng: hasGeo ? stop.location.lng : 'N/A',
-        arrival: stop.time?.arrival || 'N/A',
-        departure: stop.time?.departure || 'N/A',
+        arrival: formatDateTime(stop.time?.arrival),
+        departure: formatDateTime(stop.time?.departure),
         actualSvc: actualSvcSecs !== null ? fmtSecs(actualSvcSecs) : 'N/A',
         plannedSvc: plannedSvcSecs !== undefined ? fmtSecs(plannedSvcSecs) : '—',
-        timeWindows: twStr ?? '—',
+        timeWindows: formatTimeWindowsText(timeWindows),
+        timeWindowsHtml: formatTimeWindowsHtml(timeWindows),
         distance: stop.distance ?? 'N/A',
         load: fmtLoad(stop.load),
         skills: skillsStr,
       }
 
+      if (isGeo && hasGeo) {
+        const x = stop.location.lng
+        const y = stop.location.lat
+        coords.push([x, y])
+        hasValidCoords = true
+        scatterData.push({
+          name: pointLabel,
+          value: [x, y],
+          ...getEChartDataPointStyle(actType, color, isDepot ? 14 : 12),
+          stopMeta
+        })
+      }
+
       if (isIndex && hasIdx) {
+        hasValidCoords = true
         const nodeId = `loc_${stop.location.index}`
-        const isDepot = primaryActivity?.type === 'departure' || primaryActivity?.type === 'arrival' || primaryActivity?.type === 'depot'
-        
+
         if (!graphNodes.has(nodeId)) {
           graphNodes.set(nodeId, {
             id: nodeId,
             name: pointLabel,
-            symbol: shape,
-            symbolSize: size * 1.5,
-            itemStyle: { color: isDepot ? color : undefined },
+            ...getEChartDataPointStyle(actType, color, isDepot ? 18 : 14),
             stopMeta
           })
         }
-        
+
         if (prevNodeId !== null && prevNodeId !== nodeId) {
           graphLinks.push({
             source: prevNodeId,
@@ -628,7 +836,119 @@ const mapChartOption = computed(() => {
         prevNodeId = nodeId
       }
     })
+
+    if (isGeo) {
+      const lineTooltip = {
+        ...darkChartTooltipStyle,
+        formatter: () => {
+          return [
+            `<b>${tour.vehicleId}</b>`,
+            `Distance: ${tour.statistic?.distance ?? 'N/A'}`,
+            `Duration: ${tour.statistic?.duration != null ? fmtSecs(tour.statistic.duration) : 'N/A'}`
+          ].join('<br/>')
+        }
+      }
+
+      if (coords.length > 1) {
+        series.push({
+          type: 'lines',
+          coordinateSystem: 'cartesian2d',
+          data: [{ coords: [coords[0], coords[1]] }],
+          lineStyle: { color, width: 2.2, opacity: 0.9, type: 'solid' },
+          zlevel: 1,
+          tooltip: lineTooltip
+        })
+      }
+
+      if (coords.length > 2) {
+        series.push({
+          type: 'lines',
+          coordinateSystem: 'cartesian2d',
+          polyline: true,
+          data: [{ coords: coords.slice(1) }],
+          lineStyle: { color, width: 2.2, opacity: 0.6, type: 'dashed' },
+          zlevel: 1,
+          tooltip: lineTooltip
+        })
+      }
+
+      if (scatterData.length > 0) {
+        series.push({
+          type: 'scatter',
+          coordinateSystem: 'cartesian2d',
+          data: scatterData,
+          labelLayout: { hideOverlap: true },
+          zlevel: 2,
+          tooltip: {
+            ...darkChartTooltipStyle,
+            formatter: (params: any) => {
+              const m = params.data?.stopMeta || {}
+              return createTooltipHtml([
+                `<b>${escapeHtml(m.vehicleId)}</b> · ${escapeHtml(m.pointLabel)}`,
+                `Type: ${escapeHtml(m.actType)}`,
+                `Lat/Lng: ${escapeHtml(fmtCoord(m.lat))}, ${escapeHtml(fmtCoord(m.lng))}`,
+                `Arrival: ${escapeHtml(m.arrival)}`,
+                `Departure: ${escapeHtml(m.departure)}`,
+                `Actual service: ${escapeHtml(m.actualSvc)}`,
+                `Planned service: ${escapeHtml(m.plannedSvc)}`,
+                `Skills: ${escapeHtml(m.skills)}`,
+                `Distance: ${escapeHtml(m.distance)}`,
+                `Load: ${escapeHtml(m.load)}`,
+              ], m.timeWindowsHtml || '<div class="vrp-tooltip-empty">—</div>')
+            }
+          }
+        })
+      }
+    }
   })
+
+  if (isGeo && unassignedJobs.length) {
+    const unassignedPoints = unassignedJobs
+      .map((item: any) => {
+        const loc = getUnassignedLocation(item)
+        if (loc?.lng === undefined || loc?.lat === undefined) return null
+        hasValidCoords = true
+        const meta = createUnassignedMeta(item)
+        return {
+          name: meta.jobId,
+          value: [loc.lng, loc.lat],
+          ...getEChartDataPointStyle(meta.actType, '#475569', 14),
+          stopMeta: meta,
+        }
+      })
+      .filter(Boolean)
+
+    if (unassignedPoints.length > 0) {
+      series.push({
+        name: 'Unassigned Jobs',
+        type: 'scatter',
+        coordinateSystem: 'cartesian2d',
+        data: unassignedPoints,
+        labelLayout: { hideOverlap: true },
+        zlevel: 3,
+        tooltip: { ...darkChartTooltipStyle, formatter: (params: any) => formatUnassignedTooltip(params.data?.stopMeta || {}) }
+      })
+    }
+  }
+
+  if (isIndex && unassignedJobs.length) {
+    unassignedJobs.forEach((item: any) => {
+      const loc = getUnassignedLocation(item)
+      if (loc?.index === undefined) return
+      hasValidCoords = true
+      const meta = createUnassignedMeta(item)
+      const nodeId = `unassigned_${meta.jobId}_${loc.index}`
+      if (!graphNodes.has(nodeId)) {
+        graphNodes.set(nodeId, {
+          id: nodeId,
+          name: meta.jobId,
+          ...getEChartDataPointStyle(meta.actType, '#475569', 18),
+          stopMeta: meta,
+          isUnassigned: true,
+        })
+      }
+    })
+  }
 
   if (isIndex) {
     series.push({
@@ -642,23 +962,28 @@ const mapChartOption = computed(() => {
       roam: true,
       data: Array.from(graphNodes.values()),
       links: graphLinks,
-      label: { show: true, position: 'right', formatter: '{b}' },
+      label: {
+        show: true,
+        position: 'right',
+        formatter: (params: any) => `${getTypeEmoji(params.data?.stopMeta?.actType || 'stop')} ${params.data?.name || ''}`
+      },
       tooltip: {
+        ...darkChartTooltipStyle,
         formatter: (params: any) => {
           if (params.dataType === 'node') {
             const m = params.data?.stopMeta || {}
-            return [
-              `<b>${m.vehicleId || 'N/A'}</b> · ${m.pointLabel}`,
-              `Type: ${m.actType}`,
-              `Arrival: ${m.arrival}`,
-              `Departure: ${m.departure}`,
-              `Actual service: ${m.actualSvc}`,
-              `Planned service: ${m.plannedSvc}`,
-              `Time window: ${m.timeWindows}`,
-              `Skills: ${m.skills}`,
-              `Distance: ${m.distance}`,
-              `Load: ${m.load}`,
-            ].join('<br/>')
+            if (params.data?.isUnassigned) return formatUnassignedTooltip(m)
+            return createTooltipHtml([
+              `<b>${escapeHtml(m.vehicleId || 'N/A')}</b> · ${escapeHtml(m.pointLabel)}`,
+              `Type: ${escapeHtml(m.actType)}`,
+              `Arrival: ${escapeHtml(m.arrival)}`,
+              `Departure: ${escapeHtml(m.departure)}`,
+              `Actual service: ${escapeHtml(m.actualSvc)}`,
+              `Planned service: ${escapeHtml(m.plannedSvc)}`,
+              `Skills: ${escapeHtml(m.skills)}`,
+              `Distance: ${escapeHtml(m.distance)}`,
+              `Load: ${escapeHtml(m.load)}`,
+            ], m.timeWindowsHtml || '<div class="vrp-tooltip-empty">—</div>')
           } else if (params.dataType === 'edge') {
             return 'Route segment'
           }
@@ -667,61 +992,119 @@ const mapChartOption = computed(() => {
     })
   }
 
-  const baseOption: any = {
+  if (!hasValidCoords) {
+    return {
+      backgroundColor: 'transparent',
+      title: {
+        text: 'No valid coordinates found',
+        left: 'center',
+        top: 'center',
+        textStyle: { color: '#cbd5e1', fontSize: 16 }
+      }
+    }
+  }
+
+  if (isGeo) {
+    return {
+      title: { show: false },
+      animationDuration: 300,
+      animationDurationUpdate: 300,
+      backgroundColor: 'transparent',
+      tooltip: { trigger: 'item', confine: true, ...darkChartTooltipStyle },
+      grid: { left: 16, right: 16, top: 16, bottom: 16, containLabel: false },
+      xAxis: {
+        type: 'value',
+        scale: true,
+        axisLine: { show: false },
+        axisLabel: { show: false },
+        splitLine: { show: false }
+      },
+      yAxis: {
+        type: 'value',
+        scale: true,
+        axisLine: { show: false },
+        axisLabel: { show: false },
+        splitLine: { show: false }
+      },
+      dataZoom: [
+        { type: 'inside', xAxisIndex: 0, filterMode: 'none' },
+        { type: 'inside', yAxisIndex: 0, filterMode: 'none' }
+      ],
+      series
+    }
+  }
+
+  return {
     title: { show: false },
     animationDuration: 300,
     animationDurationUpdate: 300,
     backgroundColor: 'transparent',
-    tooltip: { trigger: 'item' },
+    tooltip: { trigger: 'item', confine: true, ...darkChartTooltipStyle },
     series
   }
-
-  return baseOption
 })
+
+const ensureMainMapChart = async () => {
+  await nextTick()
+  if (useMapboxMode.value || !mapContainer.value) return
+
+  if (!mainMapChart) {
+    mainMapChart = echarts.init(mapContainer.value)
+    mapResizeObserver?.disconnect()
+    mapResizeObserver = new ResizeObserver(() => {
+      mainMapChart?.resize()
+    })
+    mapResizeObserver.observe(mapContainer.value)
+  }
+
+  mainMapChart.setOption(mapChartOption.value, true)
+  mainMapChart.resize()
+}
+
+const ensureMapboxMap = async () => {
+  await nextTick()
+  if (!useMapboxMode.value || !mapboxToken.value || !mapboxContainer.value) return
+
+  if (!mapboxMapInstance) {
+    mapboxgl.accessToken = mapboxToken.value
+    mapboxMapInstance = new mapboxgl.Map({
+      container: mapboxContainer.value,
+      style: 'mapbox://styles/mapbox/dark-v11',
+      center: [0, 0],
+      zoom: 2
+    })
+    mapboxMapInstance.on('load', updateMapboxData)
+  } else {
+    mapboxgl.accessToken = mapboxToken.value
+    mapboxMapInstance.resize()
+    updateMapboxData()
+  }
+}
 
 onMounted(() => {
   fetchProblems()
-  
-  if (mapContainer.value) {
-    mainMapChart = echarts.init(mapContainer.value)
-    mainMapChart.setOption(mapChartOption.value)
-    const resizeObserver = new ResizeObserver(() => {
-      mainMapChart?.resize()
-    })
-    resizeObserver.observe(mapContainer.value)
-  }
+  ensureMainMapChart()
 })
 
-watch(() => mapChartOption.value, (newOpt) => {
+watch(() => mapChartOption.value, async (newOpt) => {
+  if (useMapboxMode.value) return
+  await ensureMainMapChart()
   if (mainMapChart && newOpt) {
     mainMapChart.setOption(newOpt, true)
+    mainMapChart.resize()
   }
-}, { deep: true })
+}, { deep: true, flush: 'post' })
 
-watch(() => [isGeoMode.value, mapboxToken.value], async ([isGeo, token]) => {
-  await nextTick()
-  if (isGeo) {
-    if (!mapboxMapInstance && token && mapboxContainer.value) {
-      mapboxgl.accessToken = token as string
-      mapboxMapInstance = new mapboxgl.Map({
-        container: mapboxContainer.value,
-        style: 'mapbox://styles/mapbox/dark-v11',
-        center: [0, 0],
-        zoom: 2
-      })
-      mapboxMapInstance.on('load', updateMapboxData)
-    } else if (mapboxMapInstance) {
-      mapboxMapInstance.resize()
-      if (token) mapboxgl.accessToken = token as string
-    }
-  } else {
-    if (mapContainer.value) {
-      if (mainMapChart) mainMapChart.dispose()
-      mainMapChart = echarts.init(mapContainer.value)
-      mainMapChart.setOption(mapChartOption.value)
-    }
-  }
-})
+watch(() => [runData.value.history.length, currentHistoryIndex.value, activeTab.value, useMapboxMode.value], async () => {
+  if (activeTab.value !== 'map') return
+  if (useMapboxMode.value) await ensureMapboxMap()
+  else await ensureMainMapChart()
+}, { flush: 'post' })
+
+watch(() => [useMapboxMode.value, mapboxToken.value], async ([useMapbox]) => {
+  if (useMapbox) await ensureMapboxMap()
+  else await ensureMainMapChart()
+}, { flush: 'post' })
 
 const updateMapboxData = () => {
   const map = mapboxMapInstance
@@ -771,25 +1154,13 @@ const updateMapboxData = () => {
           return Math.round((dep - arr) / 1000)
         })()
 
-        const jm = jobsMeta.value[jobId]
-        const place0 = jm?.places?.[0]
-        const plannedSvcSecs: number | undefined = place0?.duration
-        const timeWindows: any[][] | undefined = place0?.times
-        const twStr = timeWindows?.length
-          ? timeWindows.map((tw: any[]) => `${tw[0]} – ${tw[1]}`).join(', ')
-          : undefined
-          
-        const skillsObj = jm?.skills
-        let skillsStr = '—'
-        if (skillsObj) {
-           const parts = []
-           if (skillsObj.allOf?.length) parts.push(`All: ${skillsObj.allOf.join(', ')}`)
-           if (skillsObj.anyOf?.length) parts.push(`Any: ${skillsObj.anyOf.join(', ')}`)
-           if (skillsObj.noneOf?.length) parts.push(`None: ${skillsObj.noneOf.join(', ')}`)
-           if (parts.length) skillsStr = parts.join(' | ')
-        }
-        
         const actType = act?.type || 'stop'
+        const jm = getJobMeta(jobId)
+        const place0 = getJobPlaceForActivity(jobId, actType)
+        const plannedSvcSecs: number | undefined = place0?.duration
+        const timeWindows = getPlaceTimeWindows(place0)
+          
+        const skillsStr = formatSkills(jm?.skills)
         const typeColor = typeColorMap[actType] ?? color
         const typeEmoji = typeEmojiMap[actType] ?? '●'
         
@@ -803,12 +1174,13 @@ const updateMapboxData = () => {
             id: jobId,
             pointLabel: pointLabel,
             type: actType,
-            arrival: stop.time?.arrival || 'N/A',
-            departure: stop.time?.departure || 'N/A',
+            arrival: formatDateTime(stop.time?.arrival),
+            departure: formatDateTime(stop.time?.departure),
             vehicleId: tour.vehicleId,
             actualSvc: actualSvcSecs !== null ? fmtSecs(actualSvcSecs) : 'N/A',
             plannedSvc: plannedSvcSecs !== undefined ? fmtSecs(plannedSvcSecs) : '—',
-            timeWindows: twStr ?? '—',
+            timeWindows: formatTimeWindowsText(timeWindows),
+            timeWindowsHtml: formatTimeWindowsHtml(timeWindows),
             distance: stop.distance ?? 'N/A',
             load: fmtLoad(stop.load),
             skills: skillsStr,
@@ -833,11 +1205,9 @@ const updateMapboxData = () => {
   })
   
   step.unassigned?.forEach((item: any) => {
-    const jobId = item.jobId
-    const jm = jobsMeta.value[jobId]
-    const loc = jm?.places?.[0]?.location
+    const loc = getUnassignedLocation(item)
 
-    if (loc?.lng !== undefined) {
+    if (loc?.lng !== undefined && loc?.lat !== undefined) {
       const lng = loc.lng
       const lat = loc.lat
       hasValidCoords = true
@@ -846,28 +1216,32 @@ const updateMapboxData = () => {
       minLat = Math.min(minLat, lat)
       maxLat = Math.max(maxLat, lat)
       
-      const actType = item.actType || 'unassigned'
+      const meta = createUnassignedMeta(item)
+      const actType = meta.actType
       
       unassignedFeatures.push({
         type: 'Feature',
         geometry: { type: 'Point', coordinates: [lng, lat] },
         properties: {
-            color: typeColorMap[actType] ?? '#94a3b8',
+            color: getTypeColor(actType, typeColorMap.unassigned),
             vehicleColor: '#475569',
-            emoji: typeEmojiMap[actType] ?? '✕',
-            id: jobId || 'Unassigned',
-            pointLabel: jobId || 'Unassigned',
+            emoji: getTypeEmoji(actType, typeEmojiMap.unassigned),
+            id: meta.jobId || 'Unassigned',
+            pointLabel: meta.pointLabel || 'Unassigned',
             type: actType,
+            isUnassigned: true,
+            reason: meta.reason,
             arrival: 'N/A',
             departure: 'N/A',
             vehicleId: '',
             actualSvc: 'N/A',
-            plannedSvc: 'N/A',
-            timeWindows: '—',
+            plannedSvc: meta.plannedSvc,
+            timeWindows: meta.timeWindows,
+            timeWindowsHtml: meta.timeWindowsHtml,
             distance: 'N/A',
             load: 'N/A',
-            skills: '—',
-            radius: 6
+            skills: meta.skills,
+            radius: 7
         }
       })
     }
@@ -914,28 +1288,13 @@ const updateMapboxData = () => {
       }
     })
     
-    const popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false })
+    const popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, maxWidth: '360px' })
     map.on('mouseenter', 'vrp-points-layer', (e: any) => {
         map.getCanvas().style.cursor = 'pointer'
-        const p = e.features[0].properties
-        if (p.type === 'unassigned') {
-            popup.setLngLat(e.features[0].geometry.coordinates).setHTML(`<b>Unassigned</b><br/>Job: ${p.id}<br/>Type: ${p.type}`).addTo(map)
-        } else {
-            const html = [
-                `<b>${p.vehicleId || 'N/A'}</b> · ${p.pointLabel}`,
-                `Type: ${p.type}`,
-                `Lat/Lng: ${fmtCoord(e.features[0].geometry.coordinates[1])}, ${fmtCoord(e.features[0].geometry.coordinates[0])}`,
-                `Arrival: ${p.arrival}`,
-                `Departure: ${p.departure}`,
-                `Actual service: ${p.actualSvc}`,
-                `Planned service: ${p.plannedSvc}`,
-                `Time window: ${p.timeWindows}`,
-                `Skills: ${p.skills}`,
-                `Distance: ${p.distance}`,
-                `Load: ${p.load}`
-            ].join('<br/>')
-            popup.setLngLat(e.features[0].geometry.coordinates).setHTML(html).addTo(map)
-        }
+        const feature = e.features[0]
+        const properties = feature.properties
+        const [lng, lat] = feature.geometry.coordinates
+        popup.setLngLat(feature.geometry.coordinates).setHTML(formatMapboxPointTooltip(properties, lat, lng)).addTo(map)
     })
     map.on('mouseleave', 'vrp-points-layer', () => {
         map.getCanvas().style.cursor = ''
@@ -945,25 +1304,8 @@ const updateMapboxData = () => {
     // Mirror hover on the emoji symbol layer (it sits on top of the circles)
     const showPointPopup = (e: any) => {
         map.getCanvas().style.cursor = 'pointer'
-        const p = e.features[0].properties
-        if (p.type === 'unassigned') {
-            popup.setLngLat(e.lngLat).setHTML(`<b>Unassigned</b><br/>Job: ${p.id}<br/>Type: ${p.type}`).addTo(map)
-        } else {
-            const html = [
-                `<b>${p.vehicleId || 'N/A'}</b> · ${p.pointLabel}`,
-                `Type: ${p.type}`,
-                `Lat/Lng: ${fmtCoord(e.lngLat.lat)}, ${fmtCoord(e.lngLat.lng)}`,
-                `Arrival: ${p.arrival}`,
-                `Departure: ${p.departure}`,
-                `Actual service: ${p.actualSvc}`,
-                `Planned service: ${p.plannedSvc}`,
-                `Time window: ${p.timeWindows}`,
-                `Skills: ${p.skills}`,
-                `Distance: ${p.distance}`,
-                `Load: ${p.load}`
-            ].join('<br/>')
-            popup.setLngLat(e.lngLat).setHTML(html).addTo(map)
-        }
+        const properties = e.features[0].properties
+        popup.setLngLat(e.lngLat).setHTML(formatMapboxPointTooltip(properties, e.lngLat.lat, e.lngLat.lng)).addTo(map)
     }
     map.on('mouseenter', 'vrp-labels-layer', showPointPopup)
     map.on('mouseleave', 'vrp-labels-layer', () => {
@@ -1002,7 +1344,7 @@ const updateMapboxData = () => {
 }
 
 watch(() => currentSnapshot.value, () => {
-  if (isGeoMode.value) {
+  if (useMapboxMode.value) {
     updateMapboxData()
   }
 }, { deep: true })
@@ -1010,8 +1352,8 @@ watch(() => currentSnapshot.value, () => {
 watch(activeTab, (newTab) => {
   nextTick(() => {
     if (newTab === 'map') {
-      if (isGeoMode.value) mapboxMapInstance?.resize()
-      else mainMapChart?.resize()
+      if (useMapboxMode.value) ensureMapboxMap()
+      else ensureMainMapChart()
     } else if (newTab === 'gantt') {
       ganttChartRef.value?.resize()
     }
@@ -1039,7 +1381,7 @@ setInterval(() => {
 
       <div class="toolbar">
         <a-upload
-          action="/api/upload"
+          :action="getApiUrl('/api/upload')"
           :showUploadList="false"
           accept=".txt"
           @change="handleUploadChange"
@@ -1111,8 +1453,8 @@ setInterval(() => {
                           size="small"
                         />
                       </div>
-                      <div v-show="!isGeoMode" ref="mapContainer" class="map-chart"></div>
-                      <div v-show="isGeoMode" ref="mapboxContainer" class="map-chart"></div>
+                      <div v-show="!useMapboxMode" ref="mapContainer" class="map-chart"></div>
+                      <div v-show="useMapboxMode" ref="mapboxContainer" class="map-chart"></div>
                   </div>
                 </a-tab-pane>
                 <a-tab-pane key="gantt" tab="Gantt Chart" :forceRender="true">
@@ -1123,7 +1465,7 @@ setInterval(() => {
                 <a-tab-pane key="inspector" tab="Data Inspector">
                   <div class="chart-shell data-inspector" style="overflow-y: auto; padding: 16px;">
                       <h3 class="inspector-title">Unassigned Jobs ({{ unassignedData.length }})</h3>
-                      <a-table :dataSource="unassignedData" :columns="unassignedColumns" size="small" :pagination="false" :rowKey="r => r.jobId">
+                      <a-table :dataSource="unassignedData" :columns="unassignedColumns" size="small" :pagination="false" :rowKey="getUnassignedRowKey">
                         <template #bodyCell="{ column, record }">
                           <template v-if="column.key === 'jobId'">
                             <span :style="{ color: typeColorMap[record.actType] ?? '#94a3b8', marginRight: '6px' }">
@@ -1142,7 +1484,7 @@ setInterval(() => {
                               <span :style="{ color: getStopColor(stop), marginRight: '4px' }">{{ getStopEmoji(stop) }}</span>
                               <b>{{ stop.activities?.[0]?.jobId || stop.activities?.[0]?.type }}</b>
                               <span style="color: #94a3b8; margin-left: 8px;">
-                                Arr: {{ new Date(stop.time?.arrival).toLocaleTimeString() }} | Dep: {{ new Date(stop.time?.departure).toLocaleTimeString() }}
+                                Arr: {{ formatDateTime(stop.time?.arrival) }} | Dep: {{ formatDateTime(stop.time?.departure) }}
                               </span>
                             </a-timeline-item>
                           </a-timeline>
@@ -1434,6 +1776,7 @@ setInterval(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  height: 100%;
 }
 
 .insight-card :deep(.ant-card-body) {
@@ -1534,6 +1877,7 @@ setInterval(() => {
 .chart-shell {
   flex: 1;
   min-height: 0;
+  height: 100%;
   border-radius: 18px;
   overflow: hidden;
   background: linear-gradient(180deg, rgba(15, 23, 42, 0.65), rgba(15, 23, 42, 0.25));
@@ -1697,21 +2041,34 @@ setInterval(() => {
 }
 
 .main-tabs {
-  height: 650px;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
+.main-tabs :deep(.ant-tabs-content-holder) {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+}
+
 .main-tabs :deep(.ant-tabs-content) {
   flex: 1;
+  min-height: 0;
   height: 100%;
+  display: flex;
 }
 
 .main-tabs :deep(.ant-tabs-tabpane) {
   height: 100%;
+  min-height: 0;
 }
 .main-tabs :deep(.ant-tabs-tabpane.ant-tabs-tabpane-active) {
   display: flex;
+  flex: 1;
+  min-height: 0;
   flex-direction: column;
 }
 .inspector-title {
@@ -1750,4 +2107,46 @@ setInterval(() => {
 .data-inspector :deep(.ant-timeline-item-content) {
   color: #e2e8f0;
 }
+
+:global(.vrp-tooltip-section) {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+:global(.vrp-tooltip-section-title) {
+  margin-bottom: 4px;
+  color: #f8fafc;
+  font-weight: 800;
+}
+
+:global(.vrp-tooltip-tw-row) {
+  display: block;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+:global(.vrp-tooltip-empty) {
+  color: #cbd5e1;
+}
+
+:global(.mapboxgl-popup-content) {
+  max-width: 360px;
+  white-space: normal;
+  color: #f8fafc;
+  background: rgba(15, 23, 42, 0.95);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.35);
+}
+
+:global(.mapboxgl-popup-tip) {
+  border-top-color: rgba(15, 23, 42, 0.95);
+  border-right-color: rgba(15, 23, 42, 0.95);
+  border-bottom-color: rgba(15, 23, 42, 0.95);
+  border-left-color: rgba(15, 23, 42, 0.95);
+}
+
 </style>

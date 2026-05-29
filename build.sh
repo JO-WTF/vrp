@@ -12,6 +12,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$SCRIPT_DIR"
 VENV_PYTHON="$ROOT_DIR/.venv/bin/python"
+USE_UV=false
 
 # Parse arguments
 CLEAN=false
@@ -38,11 +39,31 @@ echo "Build profile: $BUILD_PROFILE"
 echo ""
 
 # Check prerequisites
-if [ ! -f "$VENV_PYTHON" ]; then
+if command -v uv >/dev/null 2>&1; then
+    USE_UV=true
+fi
+
+if [ "$USE_UV" = true ] && [ ! -f "$VENV_PYTHON" ]; then
+    echo "Python virtual environment not found; creating .venv with uv..."
+    cd "$ROOT_DIR"
+    uv venv .venv
+elif [ ! -f "$VENV_PYTHON" ]; then
     echo "ERROR: Python virtual environment not found at $VENV_PYTHON"
-    echo "Please create a .venv with: python -m venv .venv"
+    echo "Please create a .venv with: uv venv .venv (or python -m venv .venv)"
     exit 1
 fi
+
+
+ensure_pip() {
+    if ! "$VENV_PYTHON" -m pip --version >/dev/null 2>&1; then
+        echo "  pip not found in .venv; bootstrapping with ensurepip..."
+        if ! "$VENV_PYTHON" -m ensurepip --upgrade >/dev/null 2>&1; then
+            echo "ERROR: pip is not available in $VENV_PYTHON and ensurepip failed."
+            echo "Please install uv, recreate the environment with pip, or install python3-venv/python ensurepip support."
+            exit 1
+        fi
+    fi
+}
 
 # Step 1: Clean (optional)
 if [ "$CLEAN" = true ]; then
@@ -70,15 +91,17 @@ fi
 # Step 3: Build and install Python package (unless skipped)
 if [ "$NO_PYTHON" != true ]; then
     echo "Step 3: Building Python wheel with maturin..."
-    
-    # Check if maturin is available
-    if ! $VENV_PYTHON -c "import maturin" 2>/dev/null; then
-        echo "  Installing maturin..."
-        $VENV_PYTHON -m pip install "maturin>=0.14,<0.15" -q
-    fi
-    
+
     cd "$ROOT_DIR/vrp-cli"
-    $VENV_PYTHON -m maturin build --release
+    echo "  Installing Python build dependencies from vrp-cli/requirements.txt..."
+    if [ "$USE_UV" = true ]; then
+        uv pip install --python "$ROOT_DIR/.venv/bin/python" -r "$ROOT_DIR/vrp-cli/requirements.txt" -q
+        uv run --python "$ROOT_DIR/.venv/bin/python" maturin build --release
+    else
+        ensure_pip
+        "$VENV_PYTHON" -m pip install -r "$ROOT_DIR/vrp-cli/requirements.txt" -q
+        "$VENV_PYTHON" -m maturin build --release
+    fi
     echo "  Python wheel build complete."
     echo ""
     
@@ -90,14 +113,23 @@ if [ "$NO_PYTHON" != true ]; then
     fi
     
     echo "  Installing from: $(basename $WHEEL_FILE)"
-    $VENV_PYTHON -m pip install "$WHEEL_FILE" --force-reinstall -q
+    if [ "$USE_UV" = true ]; then
+        uv pip install --python "$ROOT_DIR/.venv/bin/python" "$WHEEL_FILE" --reinstall -q
+    else
+        ensure_pip
+        "$VENV_PYTHON" -m pip install "$WHEEL_FILE" --force-reinstall -q
+    fi
     echo "  Installation complete."
     echo ""
 fi
 
 # Step 5: Verification
 echo "Step 5: Verifying installation..."
-$VENV_PYTHON -c "import vrp_cli; print('vrp_cli module imported successfully'); print([x for x in dir(vrp_cli) if not x.startswith('_')])" || true
+if [ "$USE_UV" = true ]; then
+    uv run --python "$ROOT_DIR/.venv/bin/python" python -c "import vrp_cli; print('vrp_cli module imported successfully'); print([x for x in dir(vrp_cli) if not x.startswith('_')])" || true
+else
+    $VENV_PYTHON -c "import vrp_cli; print('vrp_cli module imported successfully'); print([x for x in dir(vrp_cli) if not x.startswith('_')])" || true
+fi
 
 echo ""
 echo "=== Build Complete ==="
