@@ -313,6 +313,13 @@ const createTooltipHtml = (lines: string[], timeWindowsHtml: string): string => 
   formatTimeWindowsSection(timeWindowsHtml),
 ].join('')
 
+const darkChartTooltipStyle = {
+  backgroundColor: 'rgba(15, 23, 42, 0.95)',
+  borderColor: 'rgba(99, 102, 241, 0.35)',
+  textStyle: { color: '#f8fafc' },
+  extraCssText: 'max-width: 360px; white-space: normal; color: #f8fafc;'
+}
+
 const colors = ['#8b5cf6', '#38bdf8', '#34d399', '#f59e0b', '#f472b6', '#22d3ee', '#fb7185', '#a78bfa']
 
 const typeColorMap: Record<string, string> = {
@@ -540,9 +547,7 @@ const convergenceChartOption = computed(() => {
     backgroundColor: 'transparent',
     tooltip: {
       trigger: 'axis',
-      backgroundColor: 'rgba(15, 23, 42, 0.95)',
-      borderColor: 'rgba(99, 102, 241, 0.35)',
-      textStyle: { color: '#f8fafc' }
+      ...darkChartTooltipStyle
     },
     grid: { left: 24, right: 12, top: 12, bottom: 32 },
     xAxis: {
@@ -643,8 +648,7 @@ const ganttChartOption = computed(() => {
           `Departure: ${escapeHtml(formatDateTime(d[2]))}`,
         ].join('<br/>')
       },
-      backgroundColor: 'rgba(15, 23, 42, 0.9)',
-      textStyle: { color: '#f8fafc' }
+      ...darkChartTooltipStyle
     },
     grid: { left: 80, right: 20, top: 20, bottom: 40 },
     xAxis: {
@@ -840,6 +844,7 @@ const mapChartOption = computed(() => {
 
     if (isGeo) {
       const lineTooltip = {
+        ...darkChartTooltipStyle,
         formatter: () => {
           return [
             `<b>${tour.vehicleId}</b>`,
@@ -880,6 +885,7 @@ const mapChartOption = computed(() => {
           labelLayout: { hideOverlap: true },
           zlevel: 2,
           tooltip: {
+            ...darkChartTooltipStyle,
             formatter: (params: any) => {
               const m = params.data?.stopMeta || {}
               return createTooltipHtml([
@@ -925,7 +931,7 @@ const mapChartOption = computed(() => {
         data: unassignedPoints,
         labelLayout: { hideOverlap: true },
         zlevel: 3,
-        tooltip: { formatter: (params: any) => formatUnassignedTooltip(params.data?.stopMeta || {}) }
+        tooltip: { ...darkChartTooltipStyle, formatter: (params: any) => formatUnassignedTooltip(params.data?.stopMeta || {}) }
       })
     }
   }
@@ -967,6 +973,7 @@ const mapChartOption = computed(() => {
         formatter: (params: any) => `${getTypeEmoji(params.data?.stopMeta?.actType || 'stop')} ${params.data?.name || ''}`
       },
       tooltip: {
+        ...darkChartTooltipStyle,
         formatter: (params: any) => {
           if (params.dataType === 'node') {
             const m = params.data?.stopMeta || {}
@@ -1008,7 +1015,7 @@ const mapChartOption = computed(() => {
       animationDuration: 300,
       animationDurationUpdate: 300,
       backgroundColor: 'transparent',
-      tooltip: { trigger: 'item', confine: true, extraCssText: 'max-width: 360px; white-space: normal;' },
+      tooltip: { trigger: 'item', confine: true, ...darkChartTooltipStyle },
       grid: { left: 16, right: 16, top: 16, bottom: 16, containLabel: false },
       xAxis: {
         type: 'value',
@@ -1037,7 +1044,7 @@ const mapChartOption = computed(() => {
     animationDuration: 300,
     animationDurationUpdate: 300,
     backgroundColor: 'transparent',
-    tooltip: { trigger: 'item', confine: true, extraCssText: 'max-width: 360px; white-space: normal;' },
+    tooltip: { trigger: 'item', confine: true, ...darkChartTooltipStyle },
     series
   }
 })
