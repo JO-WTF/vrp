@@ -272,14 +272,62 @@ const typeEmojiMap: Record<string, string> = {
   unassigned: '✕',
 }
 
+
+const typeSymbolMap: Record<string, string> = {
+  departure: 'rect',
+  arrival: 'rect',
+  depot: 'rect',
+  pickup: 'triangle',
+  delivery: 'triangle',
+  recharge: 'diamond',
+  break: 'roundRect',
+  service: 'triangle',
+  stop: 'circle',
+  replacement: 'diamond',
+  unassigned: 'diamond',
+}
+
+const typeSymbolRotateMap: Record<string, number> = {
+  delivery: 180,
+  service: 180,
+}
+
+const getTypeColor = (actType: string, fallback = '#38bdf8') => typeColorMap[actType] ?? fallback
+
+const getTypeEmoji = (actType: string, fallback = '●') => typeEmojiMap[actType] ?? fallback
+
+const getEChartPointStyle = (actType: string, vehicleColor: string, symbolSize = 12) => ({
+  symbol: typeSymbolMap[actType] ?? 'circle',
+  symbolRotate: typeSymbolRotateMap[actType] ?? 0,
+  symbolSize,
+  itemStyle: {
+    color: getTypeColor(actType),
+    borderColor: vehicleColor,
+    borderWidth: 2,
+  },
+})
+
+const getEChartPointLabel = (actType: string) => ({
+  show: true,
+  formatter: getTypeEmoji(actType),
+  color: '#0f172a',
+  fontSize: 12,
+  fontWeight: 700,
+})
+
+const getEChartDataPointStyle = (actType: string, vehicleColor: string, symbolSize = 12) => ({
+  ...getEChartPointStyle(actType, vehicleColor, symbolSize),
+  label: getEChartPointLabel(actType),
+})
+
 const getStopColor = (stop: any) => {
   const t = stop.activities?.[0]?.type || 'stop'
-  return typeColorMap[t] || '#38bdf8'
+  return getTypeColor(t)
 }
 
 const getStopEmoji = (stop: any) => {
   const t = stop.activities?.[0]?.type || 'stop'
-  return typeEmojiMap[t] || '●'
+  return getTypeEmoji(t)
 }
 
 
@@ -623,11 +671,12 @@ const mapChartOption = computed(() => {
 
       const skillsStr = formatSkills(jm?.skills)
 
-      const isDepot = primaryActivity?.type === 'departure' || primaryActivity?.type === 'arrival' || primaryActivity?.type === 'depot'
+      const actType = primaryActivity?.type || 'stop'
+      const isDepot = actType === 'departure' || actType === 'arrival' || actType === 'depot'
       const stopMeta = {
         jobId,
         pointLabel,
-        actType: primaryActivity?.type || 'stop',
+        actType,
         vehicleId: tour.vehicleId,
         lat: hasGeo ? stop.location.lat : 'N/A',
         lng: hasGeo ? stop.location.lng : 'N/A',
@@ -649,8 +698,7 @@ const mapChartOption = computed(() => {
         scatterData.push({
           name: pointLabel,
           value: [x, y],
-          symbol: isDepot ? 'rect' : 'circle',
-          symbolSize: isDepot ? 12 : 8,
+          ...getEChartDataPointStyle(actType, color, isDepot ? 14 : 12),
           stopMeta
         })
       }
@@ -663,9 +711,7 @@ const mapChartOption = computed(() => {
           graphNodes.set(nodeId, {
             id: nodeId,
             name: pointLabel,
-            symbol: isDepot ? 'rect' : 'circle',
-            symbolSize: isDepot ? 18 : 12,
-            itemStyle: { color: isDepot ? color : undefined },
+            ...getEChartDataPointStyle(actType, color, isDepot ? 18 : 14),
             stopMeta
           })
         }
@@ -720,7 +766,7 @@ const mapChartOption = computed(() => {
           type: 'scatter',
           coordinateSystem: 'cartesian2d',
           data: scatterData,
-          itemStyle: { color },
+          labelLayout: { hideOverlap: true },
           zlevel: 2,
           tooltip: {
             formatter: (params: any) => {
@@ -756,8 +802,7 @@ const mapChartOption = computed(() => {
         return {
           name: meta.jobId,
           value: [loc.lng, loc.lat],
-          symbol: 'diamond',
-          symbolSize: 12,
+          ...getEChartDataPointStyle(meta.actType, '#475569', 14),
           stopMeta: meta,
         }
       })
@@ -769,7 +814,7 @@ const mapChartOption = computed(() => {
         type: 'scatter',
         coordinateSystem: 'cartesian2d',
         data: unassignedPoints,
-        itemStyle: { color: typeColorMap.unassigned, borderColor: '#f8fafc', borderWidth: 1 },
+        labelLayout: { hideOverlap: true },
         zlevel: 3,
         tooltip: { formatter: (params: any) => formatUnassignedTooltip(params.data?.stopMeta || {}) }
       })
@@ -787,9 +832,7 @@ const mapChartOption = computed(() => {
         graphNodes.set(nodeId, {
           id: nodeId,
           name: meta.jobId,
-          symbol: 'diamond',
-          symbolSize: 16,
-          itemStyle: { color: typeColorMap.unassigned, borderColor: '#f8fafc', borderWidth: 1 },
+          ...getEChartDataPointStyle(meta.actType, '#475569', 18),
           stopMeta: meta,
           isUnassigned: true,
         })
@@ -809,7 +852,11 @@ const mapChartOption = computed(() => {
       roam: true,
       data: Array.from(graphNodes.values()),
       links: graphLinks,
-      label: { show: true, position: 'right', formatter: '{b}' },
+      label: {
+        show: true,
+        position: 'right',
+        formatter: (params: any) => `${getTypeEmoji(params.data?.stopMeta?.actType || 'stop')} ${params.data?.name || ''}`
+      },
       tooltip: {
         formatter: (params: any) => {
           if (params.dataType === 'node') {
@@ -1069,9 +1116,9 @@ const updateMapboxData = () => {
         type: 'Feature',
         geometry: { type: 'Point', coordinates: [lng, lat] },
         properties: {
-            color: typeColorMap.unassigned,
+            color: getTypeColor(actType, typeColorMap.unassigned),
             vehicleColor: '#475569',
-            emoji: typeEmojiMap.unassigned,
+            emoji: getTypeEmoji(actType, typeEmojiMap.unassigned),
             id: meta.jobId || 'Unassigned',
             pointLabel: meta.pointLabel || 'Unassigned',
             type: actType,
