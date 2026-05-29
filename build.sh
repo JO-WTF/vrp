@@ -43,11 +43,27 @@ if command -v uv >/dev/null 2>&1; then
     USE_UV=true
 fi
 
-if [ "$USE_UV" = false ] && [ ! -f "$VENV_PYTHON" ]; then
+if [ "$USE_UV" = true ] && [ ! -f "$VENV_PYTHON" ]; then
+    echo "Python virtual environment not found; creating .venv with uv..."
+    cd "$ROOT_DIR"
+    uv venv .venv
+elif [ ! -f "$VENV_PYTHON" ]; then
     echo "ERROR: Python virtual environment not found at $VENV_PYTHON"
     echo "Please create a .venv with: uv venv .venv (or python -m venv .venv)"
     exit 1
 fi
+
+
+ensure_pip() {
+    if ! "$VENV_PYTHON" -m pip --version >/dev/null 2>&1; then
+        echo "  pip not found in .venv; bootstrapping with ensurepip..."
+        if ! "$VENV_PYTHON" -m ensurepip --upgrade >/dev/null 2>&1; then
+            echo "ERROR: pip is not available in $VENV_PYTHON and ensurepip failed."
+            echo "Please install uv, recreate the environment with pip, or install python3-venv/python ensurepip support."
+            exit 1
+        fi
+    fi
+}
 
 # Step 1: Clean (optional)
 if [ "$CLEAN" = true ]; then
@@ -82,8 +98,9 @@ if [ "$NO_PYTHON" != true ]; then
         uv pip install --python "$ROOT_DIR/.venv/bin/python" -r "$ROOT_DIR/vrp-cli/requirements.txt" -q
         uv run --python "$ROOT_DIR/.venv/bin/python" maturin build --release
     else
-        $VENV_PYTHON -m pip install -r "$ROOT_DIR/vrp-cli/requirements.txt" -q
-        $VENV_PYTHON -m maturin build --release
+        ensure_pip
+        "$VENV_PYTHON" -m pip install -r "$ROOT_DIR/vrp-cli/requirements.txt" -q
+        "$VENV_PYTHON" -m maturin build --release
     fi
     echo "  Python wheel build complete."
     echo ""
@@ -99,7 +116,8 @@ if [ "$NO_PYTHON" != true ]; then
     if [ "$USE_UV" = true ]; then
         uv pip install --python "$ROOT_DIR/.venv/bin/python" "$WHEEL_FILE" --reinstall -q
     else
-        $VENV_PYTHON -m pip install "$WHEEL_FILE" --force-reinstall -q
+        ensure_pip
+        "$VENV_PYTHON" -m pip install "$WHEEL_FILE" --force-reinstall -q
     fi
     echo "  Installation complete."
     echo ""

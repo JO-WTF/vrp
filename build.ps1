@@ -40,10 +40,30 @@ Write-Host "Build profile: $BuildProfile"
 Write-Host ""
 
 # Step 0: Check prerequisites
-if (-not $HasUv -and -not (Test-Path $VenvPython)) {
+if ($HasUv -and -not (Test-Path $VenvPython)) {
+    Write-Host "Python virtual environment not found; creating .venv with uv..." -ForegroundColor Cyan
+    Push-Location $RootDir
+    & uv venv .venv
+    if ($LASTEXITCODE -ne 0) {
+        throw "uv venv failed with exit code $LASTEXITCODE"
+    }
+    Pop-Location
+} elseif (-not (Test-Path $VenvPython)) {
     Write-Host "ERROR: Python virtual environment not found at $VenvPython" -ForegroundColor Red
     Write-Host "Please create a .venv with: uv venv .venv (or python -m venv .venv)" -ForegroundColor Yellow
     exit 1
+}
+
+
+function Ensure-Pip {
+    & $VenvPython -m pip --version 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  pip not found in .venv; bootstrapping with ensurepip..." -ForegroundColor Cyan
+        & $VenvPython -m ensurepip --upgrade 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "pip is not available in $VenvPython and ensurepip failed. Please install uv, recreate the environment with pip, or install Python ensurepip support."
+        }
+    }
 }
 
 # Step 1: Clean (optional)
@@ -98,6 +118,7 @@ if (-not $NoPython) {
             & uv pip install --python $VenvPython -r (Join-Path $RootDir "vrp-cli\requirements.txt") -q
             & uv run --python $VenvPython maturin build --release
         } else {
+            Ensure-Pip
             & $VenvPython -m pip install -r (Join-Path $RootDir "vrp-cli\requirements.txt") -q
             $MaturinArgs = @("build", "--release")
             & $VenvPython -m maturin @MaturinArgs
@@ -129,6 +150,7 @@ if (-not $NoPython) {
         if ($HasUv) {
             & uv pip install --python $VenvPython $LatestWheel.FullName --reinstall -q
         } else {
+            Ensure-Pip
             & $VenvPython -m pip install $LatestWheel.FullName --force-reinstall -q
         }
         if ($LASTEXITCODE -ne 0) {
