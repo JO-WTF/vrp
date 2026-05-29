@@ -28,7 +28,7 @@ app.add_middleware(
 def find_problems():
     problems = []
     base_dirs = [
-        Path("data"), 
+        Path("data"),
         Path("examples/data"),
         Path("../data"),
         Path("../examples/data")
@@ -39,7 +39,7 @@ def find_problems():
                 problem_path = str(path)
                 matrix_path = problem_path.replace(".problem.json", ".matrix.json")
                 has_matrix = os.path.exists(matrix_path)
-                
+
                 source = "examples" if "examples" in str(path) else "user"
                 problems.append({
                     "id": problem_path,
@@ -59,27 +59,27 @@ async def upload_problem(file: UploadFile = File(...)):
     try:
         content = await file.read()
         content_str = content.decode("utf-8")
-        
+
         # Determine if it's solomon (starts with some text usually)
         from vrp_studio.solomon import parse_solomon
         name, problem, matrix = parse_solomon(content_str)
-        
+
         data_dir = Path("../data") if os.path.exists("../data") else Path("data")
         data_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # To avoid collisions
         base_name = name.lower().replace(" ", "_")
         if not base_name:
             base_name = file.filename.split('.')[0]
-            
+
         prob_path = data_dir / f"{base_name}.problem.json"
         matrix_path = data_dir / f"{base_name}.matrix.json"
-        
+
         with open(prob_path, "w") as f:
             json.dump(problem, f, indent=2)
         with open(matrix_path, "w") as f:
             json.dump(matrix, f, indent=2)
-            
+
         return JSONResponse({"success": True, "message": "Uploaded and converted successfully", "problem_path": str(prob_path)})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
@@ -95,7 +95,7 @@ async def get_initial_state(req: ProblemRequest):
         from vrp_cli import Problem
         problem = Problem.from_json(req.problem_path)
         d = problem.to_dict()
-        
+
         from vrp_cli.vis.tracker import _extract_jobs_meta
         jobs_meta = _extract_jobs_meta(problem)
 
@@ -115,7 +115,7 @@ async def get_initial_state(req: ProblemRequest):
                                 "location": loc,
                                 "actType": {"pickups": "pickup", "deliveries": "delivery", "services": "service", "replacements": "replacement"}.get(act_type, act_type)
                             })
-        
+
         tours = []
         for vehicle in d.get("fleet", {}).get("vehicles", []):
             vehicle_ids = vehicle.get("vehicleIds", ["v"])
@@ -227,40 +227,32 @@ class SolverThread(threading.Thread):
                         "type": "static-selective"
                     }
                 }
-            
+
             config = Config(data=preset_dict)
 
             # Apply overrides on top of the preset
             config.set_termination(max_time=self.max_time, max_generations=self.max_gen, variation=self.termination_cfg.get("variation") if self.termination_cfg else None)
             if self.parallelism is not None:
                 config.set_parallelism(self.parallelism)
-            
+
             jobs_meta = _extract_jobs_meta(problem)
             self.updates_queue.put({"type": "metadata", "data": jobs_meta})
-            
+
             start_time = time.time()
             best_cost = float('inf')
-            
-            def on_iteration(state, solution):
-                nonlocal best_cost
-                if self._stop_event.is_set():
-                    # We can't cleanly abort vrp_solve yet without killing process, but we stop queueing.
-                    return
-                
-                current_cost = solution.total_cost
-                if current_cost >= best_cost:
-                    return
-                best_cost = current_cost
-                    
+            latest_generation = 0
+
+            def build_snapshot(state, solution, is_final=False):
                 stats = solution.statistic
                 times = stats.get("times", {})
-                
-                snapshot = {
+
+                return {
                     "generation": state,
-                    "cost": current_cost,
+                    "cost": solution.total_cost,
                     "elapsed_seconds": time.time() - start_time,
                     "tours": solution.tours,
                     "unassigned": solution.unassigned,
+                    "final": is_final,
                     "statistic": {
                         "distance": stats.get("distance", 0),
                         "duration": stats.get("duration", 0),
@@ -272,18 +264,32 @@ class SolverThread(threading.Thread):
                         }
                     }
                 }
-                self.updates_queue.put({"type": "iteration", "data": snapshot})
-                
-            vrp_solve(
+
+            def on_iteration(state, solution):
+                nonlocal best_cost, latest_generation
+                latest_generation = state
+                if self._stop_event.is_set():
+                    # We can't cleanly abort vrp_solve yet without killing process, but we stop queueing.
+                    return
+
+                current_cost = solution.total_cost
+                if current_cost >= best_cost:
+                    return
+                best_cost = current_cost
+                self.updates_queue.put({"type": "iteration", "data": build_snapshot(state, solution)})
+
+            final_solution = vrp_solve(
                 problem,
                 matrices=matrices,
                 config=config,
                 on_iteration=on_iteration,
                 every=10
             )
-            
+
+            if not self._stop_event.is_set():
+                self.updates_queue.put({"type": "iteration", "data": build_snapshot(latest_generation, final_solution, is_final=True)})
             self.updates_queue.put({"type": "finished"})
-            
+
         except Exception as e:
             self.error = str(e)
             self.updates_queue.put({"type": "error", "message": self.error})
@@ -301,7 +307,7 @@ async def websocket_endpoint(websocket: WebSocket):
             max_gen = data.get("max_gen", 3000)
             parallelism = data.get("parallelism")
             heuristic_mode = data.get("heuristic_mode", "default")
-            
+
             termination_cfg = None
             if data.get("variation_sample") is not None and data.get("variation_cv") is not None:
                 termination_cfg = {
@@ -312,11 +318,11 @@ async def websocket_endpoint(websocket: WebSocket):
                         "isGlobal": True
                     }
                 }
-            
+
             updates_queue = queue.Queue()
             solver_thread = SolverThread(problem_path, matrix_path, max_time, max_gen, parallelism, termination_cfg, heuristic_mode, updates_queue)
             solver_thread.start()
-            
+
             start_time = time.time()
             last_time_sent = 0
             while solver_thread.is_alive() or not updates_queue.empty():
@@ -334,7 +340,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         await websocket.send_json({"type": "time", "data": {"elapsed_seconds": elapsed}})
                         last_time_sent = current_time
                     await asyncio.sleep(0.1)
-                    
+
     except WebSocketDisconnect:
         print("Client disconnected")
     finally:
@@ -349,7 +355,7 @@ def main():
     parser = argparse.ArgumentParser(description="VRP Studio Server")
     parser.add_argument("--port", type=int, default=8000, help="Port to run the server on")
     args = parser.parse_args()
-    
+
     uvicorn.run("vrp_studio.server:app", host="0.0.0.0", port=args.port, reload=True)
 
 if __name__ == "__main__":

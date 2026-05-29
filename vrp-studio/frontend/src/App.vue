@@ -282,12 +282,82 @@ const getStopEmoji = (stop: any) => {
   return typeEmojiMap[t] || '●'
 }
 
+
+const getBaseJobId = (jobId: unknown): string => {
+  const value = String(jobId ?? '')
+  return value.includes('/') ? value.split('/')[0] : value
+}
+
+const getJobMeta = (jobId: unknown) => jobsMeta.value[String(jobId ?? '')] ?? jobsMeta.value[getBaseJobId(jobId)]
+
+const getPrimaryJobPlace = (jobId: unknown, placeIndex = 0) => {
+  const meta = getJobMeta(jobId)
+  return meta?.places?.[placeIndex] ?? meta?.places?.[0]
+}
+
+const getUnassignedLocation = (item: any) => item?.location ?? getPrimaryJobPlace(item?.jobId)?.location
+
+const getUnassignedActType = (item: any) => item?.actType || getJobMeta(item?.jobId)?.type || 'unassigned'
+
+const formatSkills = (skillsObj: any): string => {
+  if (!skillsObj) return '—'
+  const parts = []
+  if (skillsObj.allOf?.length) parts.push(`All: ${skillsObj.allOf.join(', ')}`)
+  if (skillsObj.anyOf?.length) parts.push(`Any: ${skillsObj.anyOf.join(', ')}`)
+  if (skillsObj.noneOf?.length) parts.push(`None: ${skillsObj.noneOf.join(', ')}`)
+  return parts.length ? parts.join(' | ') : '—'
+}
+
+const formatUnassignedReason = (item: any): string => {
+  if (item?.reason) return String(item.reason)
+  if (Array.isArray(item?.reasons) && item.reasons.length) {
+    return item.reasons
+      .map((reason: any) => typeof reason === 'string' ? reason : reason?.description || reason?.code || JSON.stringify(reason))
+      .join(', ')
+  }
+  return 'Unassigned'
+}
+
+const createUnassignedMeta = (item: any) => {
+  const jobId = item?.jobId || 'Unassigned'
+  const jobMeta = getJobMeta(jobId)
+  const place = getPrimaryJobPlace(jobId)
+  const loc = getUnassignedLocation(item)
+  const timeWindows: any[][] | undefined = place?.times
+  const twStr = timeWindows?.length
+    ? timeWindows.map((tw: any[]) => `${tw[0]} – ${tw[1]}`).join(', ')
+    : undefined
+
+  return {
+    jobId,
+    pointLabel: jobId,
+    actType: getUnassignedActType(item),
+    reason: formatUnassignedReason(item),
+    lat: loc?.lat ?? 'N/A',
+    lng: loc?.lng ?? 'N/A',
+    index: loc?.index,
+    plannedSvc: place?.duration !== undefined ? fmtSecs(place.duration) : '—',
+    timeWindows: twStr ?? '—',
+    skills: formatSkills(jobMeta?.skills),
+  }
+}
+
+const formatUnassignedTooltip = (meta: any) => [
+  `<b>Unassigned</b> · ${meta.pointLabel}`,
+  `Type: ${meta.actType}`,
+  `Reason: ${meta.reason}`,
+  `Lat/Lng: ${fmtCoord(meta.lat)}, ${fmtCoord(meta.lng)}`,
+  `Planned service: ${meta.plannedSvc}`,
+  `Time window: ${meta.timeWindows}`,
+  `Skills: ${meta.skills}`,
+].join('<br/>')
+
 const unassignedData = computed(() => {
   if (!currentSnapshot.value?.unassigned) return []
   return currentSnapshot.value.unassigned.map((item: any) => ({
     jobId: item.jobId,
     actType: item.actType || 'unassigned',
-    reason: item.reason || 'No specific reason provided'
+    reason: formatUnassignedReason(item)
   }))
 })
 
@@ -472,7 +542,9 @@ const mapChartOption = computed(() => {
   if (!runData.value?.history?.length || !currentSnapshot.value) return {}
 
   const currentStep = currentSnapshot.value
-  if (!currentStep?.tours) {
+  const tours = currentStep?.tours ?? []
+  const unassignedJobs = currentStep?.unassigned ?? []
+  if (!tours.length && !unassignedJobs.length) {
     return {
       backgroundColor: 'transparent',
       title: {
@@ -487,12 +559,18 @@ const mapChartOption = computed(() => {
   let isGeo = false
   let isIndex = false
 
-  currentStep.tours.forEach((tour: any) => {
+  tours.forEach((tour: any) => {
     if (tour.stops && tour.stops.length > 0) {
       const loc = tour.stops[0].location
       if (loc?.lng !== undefined && loc?.lat !== undefined) isGeo = true
       else if (loc?.index !== undefined) isIndex = true
     }
+  })
+
+  unassignedJobs.forEach((item: any) => {
+    const loc = getUnassignedLocation(item)
+    if (loc?.lng !== undefined && loc?.lat !== undefined) isGeo = true
+    else if (loc?.index !== undefined) isIndex = true
   })
 
   isGeoMode.value = isGeo
@@ -507,7 +585,7 @@ const mapChartOption = computed(() => {
   const graphNodes = new Map<string, any>()
   const graphLinks: any[] = []
 
-  currentStep.tours.forEach((tour: any) => {
+  tours.forEach((tour: any) => {
     const color = getVehicleColor(tour.vehicleId)
     const coords: [number, number][] = []
     const scatterData: any[] = []
@@ -543,15 +621,7 @@ const mapChartOption = computed(() => {
         ? timeWindows.map((tw: any[]) => `${tw[0]} – ${tw[1]}`).join(', ')
         : undefined
 
-      const skillsObj = jm?.skills
-      let skillsStr = '—'
-      if (skillsObj) {
-        const parts = []
-        if (skillsObj.allOf?.length) parts.push(`All: ${skillsObj.allOf.join(', ')}`)
-        if (skillsObj.anyOf?.length) parts.push(`Any: ${skillsObj.anyOf.join(', ')}`)
-        if (skillsObj.noneOf?.length) parts.push(`None: ${skillsObj.noneOf.join(', ')}`)
-        if (parts.length) skillsStr = parts.join(' | ')
-      }
+      const skillsStr = formatSkills(jm?.skills)
 
       const isDepot = primaryActivity?.type === 'departure' || primaryActivity?.type === 'arrival' || primaryActivity?.type === 'depot'
       const stopMeta = {
@@ -676,25 +746,55 @@ const mapChartOption = computed(() => {
     }
   })
 
-  if (isGeo && currentStep.unassigned?.length) {
-    const unassignedData = currentStep.unassigned
-      .filter((item: any) => item.location?.lng !== undefined)
-      .map((item: any) => ({
-        name: item.jobId || 'Unassigned',
-        value: [item.location.lng, item.location.lat]
-      }))
+  if (isGeo && unassignedJobs.length) {
+    const unassignedPoints = unassignedJobs
+      .map((item: any) => {
+        const loc = getUnassignedLocation(item)
+        if (loc?.lng === undefined || loc?.lat === undefined) return null
+        hasValidCoords = true
+        const meta = createUnassignedMeta(item)
+        return {
+          name: meta.jobId,
+          value: [loc.lng, loc.lat],
+          symbol: 'diamond',
+          symbolSize: 12,
+          stopMeta: meta,
+        }
+      })
+      .filter(Boolean)
 
-    if (unassignedData.length > 0) {
+    if (unassignedPoints.length > 0) {
       series.push({
+        name: 'Unassigned Jobs',
         type: 'scatter',
         coordinateSystem: 'cartesian2d',
-        data: unassignedData,
-        symbolSize: 6,
-        itemStyle: { color: '#94a3b8' },
-        zlevel: 2,
-        tooltip: { formatter: (params: any) => `Unassigned: ${params.name}` }
+        data: unassignedPoints,
+        itemStyle: { color: typeColorMap.unassigned, borderColor: '#f8fafc', borderWidth: 1 },
+        zlevel: 3,
+        tooltip: { formatter: (params: any) => formatUnassignedTooltip(params.data?.stopMeta || {}) }
       })
     }
+  }
+
+  if (isIndex && unassignedJobs.length) {
+    unassignedJobs.forEach((item: any) => {
+      const loc = getUnassignedLocation(item)
+      if (loc?.index === undefined) return
+      hasValidCoords = true
+      const meta = createUnassignedMeta(item)
+      const nodeId = `unassigned_${meta.jobId}_${loc.index}`
+      if (!graphNodes.has(nodeId)) {
+        graphNodes.set(nodeId, {
+          id: nodeId,
+          name: meta.jobId,
+          symbol: 'diamond',
+          symbolSize: 16,
+          itemStyle: { color: typeColorMap.unassigned, borderColor: '#f8fafc', borderWidth: 1 },
+          stopMeta: meta,
+          isUnassigned: true,
+        })
+      }
+    })
   }
 
   if (isIndex) {
@@ -714,6 +814,7 @@ const mapChartOption = computed(() => {
         formatter: (params: any) => {
           if (params.dataType === 'node') {
             const m = params.data?.stopMeta || {}
+            if (params.data?.isUnassigned) return formatUnassignedTooltip(m)
             return [
               `<b>${m.vehicleId || 'N/A'}</b> · ${m.pointLabel}`,
               `Type: ${m.actType}`,
@@ -904,15 +1005,7 @@ const updateMapboxData = () => {
           ? timeWindows.map((tw: any[]) => `${tw[0]} – ${tw[1]}`).join(', ')
           : undefined
           
-        const skillsObj = jm?.skills
-        let skillsStr = '—'
-        if (skillsObj) {
-           const parts = []
-           if (skillsObj.allOf?.length) parts.push(`All: ${skillsObj.allOf.join(', ')}`)
-           if (skillsObj.anyOf?.length) parts.push(`Any: ${skillsObj.anyOf.join(', ')}`)
-           if (skillsObj.noneOf?.length) parts.push(`None: ${skillsObj.noneOf.join(', ')}`)
-           if (parts.length) skillsStr = parts.join(' | ')
-        }
+        const skillsStr = formatSkills(jm?.skills)
         
         const actType = act?.type || 'stop'
         const typeColor = typeColorMap[actType] ?? color
@@ -958,11 +1051,9 @@ const updateMapboxData = () => {
   })
   
   step.unassigned?.forEach((item: any) => {
-    const jobId = item.jobId
-    const jm = jobsMeta.value[jobId]
-    const loc = jm?.places?.[0]?.location
+    const loc = getUnassignedLocation(item)
 
-    if (loc?.lng !== undefined) {
+    if (loc?.lng !== undefined && loc?.lat !== undefined) {
       const lng = loc.lng
       const lat = loc.lat
       hasValidCoords = true
@@ -971,28 +1062,31 @@ const updateMapboxData = () => {
       minLat = Math.min(minLat, lat)
       maxLat = Math.max(maxLat, lat)
       
-      const actType = item.actType || 'unassigned'
+      const meta = createUnassignedMeta(item)
+      const actType = meta.actType
       
       unassignedFeatures.push({
         type: 'Feature',
         geometry: { type: 'Point', coordinates: [lng, lat] },
         properties: {
-            color: typeColorMap[actType] ?? '#94a3b8',
+            color: typeColorMap.unassigned,
             vehicleColor: '#475569',
-            emoji: typeEmojiMap[actType] ?? '✕',
-            id: jobId || 'Unassigned',
-            pointLabel: jobId || 'Unassigned',
+            emoji: typeEmojiMap.unassigned,
+            id: meta.jobId || 'Unassigned',
+            pointLabel: meta.pointLabel || 'Unassigned',
             type: actType,
+            isUnassigned: true,
+            reason: meta.reason,
             arrival: 'N/A',
             departure: 'N/A',
             vehicleId: '',
             actualSvc: 'N/A',
-            plannedSvc: 'N/A',
-            timeWindows: '—',
+            plannedSvc: meta.plannedSvc,
+            timeWindows: meta.timeWindows,
             distance: 'N/A',
             load: 'N/A',
-            skills: '—',
-            radius: 6
+            skills: meta.skills,
+            radius: 7
         }
       })
     }
@@ -1043,8 +1137,8 @@ const updateMapboxData = () => {
     map.on('mouseenter', 'vrp-points-layer', (e: any) => {
         map.getCanvas().style.cursor = 'pointer'
         const p = e.features[0].properties
-        if (p.type === 'unassigned') {
-            popup.setLngLat(e.features[0].geometry.coordinates).setHTML(`<b>Unassigned</b><br/>Job: ${p.id}<br/>Type: ${p.type}`).addTo(map)
+        if (p.isUnassigned) {
+            popup.setLngLat(e.features[0].geometry.coordinates).setHTML(`<b>Unassigned</b><br/>Job: ${p.id}<br/>Type: ${p.type}<br/>Reason: ${p.reason}<br/>Planned service: ${p.plannedSvc}<br/>Time window: ${p.timeWindows}<br/>Skills: ${p.skills}`).addTo(map)
         } else {
             const html = [
                 `<b>${p.vehicleId || 'N/A'}</b> · ${p.pointLabel}`,
@@ -1071,8 +1165,8 @@ const updateMapboxData = () => {
     const showPointPopup = (e: any) => {
         map.getCanvas().style.cursor = 'pointer'
         const p = e.features[0].properties
-        if (p.type === 'unassigned') {
-            popup.setLngLat(e.lngLat).setHTML(`<b>Unassigned</b><br/>Job: ${p.id}<br/>Type: ${p.type}`).addTo(map)
+        if (p.isUnassigned) {
+            popup.setLngLat(e.lngLat).setHTML(`<b>Unassigned</b><br/>Job: ${p.id}<br/>Type: ${p.type}<br/>Reason: ${p.reason}<br/>Planned service: ${p.plannedSvc}<br/>Time window: ${p.timeWindows}<br/>Skills: ${p.skills}`).addTo(map)
         } else {
             const html = [
                 `<b>${p.vehicleId || 'N/A'}</b> · ${p.pointLabel}`,
