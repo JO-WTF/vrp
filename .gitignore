@@ -33,3 +33,6 @@ callgrind*
 # VRP visualization
 .vrp_vis_data/
 vrp-cli/python/vrp_cli/vis/frontend/node_modules/
+
+# VRP Studio deployed frontend assets
+vrp-studio/vrp_studio/frontend/dist/
