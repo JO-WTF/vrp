@@ -2,22 +2,35 @@
 
 ## Introduction
 
-`vrp-cli` Python Interface 是在原作者 Rust VRP 求解器基础上进行二次开发得到的 Python 求解器界面。它的定位不是简单的命令行封装，而是一个可以在 Python 项目、Notebook、服务端程序和可视化系统中直接使用的求解器程序：用户可以用 Python 对象定义 VRP 问题、准备 routing matrix、配置启发式求解参数、运行 Rust 求解器、检查可行性、分析结果并记录优化过程。
+`vrp-cli` Python Interface 是在 [Rust VRP 求解器](https://reinterpretcat.github.io/vrp) 基础上进行二次开发封装的 Python 求解器接口。它的定位是将原有的 Rust 求解能力暴露给 Python 开发者，从而实现纯 Python 环境下的建模、求解、分析和可视化闭环。
 
-底层仍复用原 Rust 项目的 pragmatic format、solver、checker、converter 和序列化能力；上层则提供 Python 风格的 facade：`Problem`、`RoutingMatrix`、`Config`、`InitialSolution`、`Solution`、`solve`、`check`、`validate` 和可视化 tracker。
+Python Interface 使 Rust VRP 求解器可以被无缝集成到 Python 生态中，其主要能力包括：
 
-本文档结构参考原作者 VRP 文档组织方式（https://reinterpretcat.github.io/vrp/concepts/pragmatic/problem/index.html），按“Getting Started → Concepts → Examples → Internals”的顺序说明 Python Interface 作为独立求解器程序的使用方式和二次开发方式。
+| 能力 | Python API | 说明 |
+| --- | --- | --- |
+| 建模 | `Problem` | 提供 Python builder 模式或直接通过 JSON 加载，支持定义 jobs、vehicles、relations 和 objectives。 |
+| 路由数据 | `RoutingMatrix`, `MatrixCollection`, `get_locations` | 提供地点顺序提取，支持构造单 profile、多 profile 甚至 time-dependent matrix。 |
+| 配置 | `Config`, `Objective`, `Recreate`, `Ruin`, `Population`, `Hyper` | 提供 Python helper 用于灵活组合 solver termination、population、ruin-recreate 以及 hyper heuristic。 |
+| 求解 | `solve` | 直接调用底层 native Rust solver，返回类型化的 `Solution` 对象。 |
+| 初始解 | `InitialSolution` | 支持将已有的 route/tour 作为 warm start 输入以加速收敛。 |
+| 校验 | `validate`, `check`, `CheckResult` | 求解前校验 problem 与 matrix；求解后检查 solution feasibility，确保结果合法。 |
+| 分析 | `Solution`, `TourView`, `StopView` | 方便读取 statistic、tours、stops、unassigned 列表以及 GeoJSON 格式的数据。 |
+| 迭代监听 | `on_iteration` | 在 Python 环境中实时接收中间解，便于开发日志、调参及可视化监控。 |
+| 可视化记录 | `vrp_cli.vis.SolveTracker` | 记录优化历史过程，并生成供 dashboard/Studio 消费的展示数据。 |
+| 格式转换 | `convert_to_pragmatic` | 支持将外部科研/benchmark 格式一键转换为 pragmatic problem。 |
 
-## Documentation map
+在底层，Python Interface 充分复用了原 Rust 项目强大的 pragmatic format、solver、checker、converter 及序列化能力；在上层，它则通过更符合 Python 习惯的 facade 接口对外暴露：`Problem`、`RoutingMatrix`、`Config`、`InitialSolution`、`Solution`、`solve`、`check`、`validate` 和可视化 tracker。
+
+## Documentation Map
 
 * [1. Getting Started](python-interface/getting-started.md)
-  * [1.1. Features](python-interface/getting-started.md#11-features)
+  * [1.1. Prerequisites](python-interface/getting-started.md#11-prerequisites)
   * [1.2. Installation](python-interface/getting-started.md#12-installation)
   * [1.3. Defining problem](python-interface/getting-started.md#13-defining-problem)
-  * [1.4. Acquiring routing info](python-interface/getting-started.md#14-acquiring-routing-info)
+  * [1.4. Building routing matrix](python-interface/getting-started.md#14-building-routing-matrix)
   * [1.5. Running solver](python-interface/getting-started.md#15-running-solver)
   * [1.6. Analyzing results](python-interface/getting-started.md#16-analyzing-results)
-  * [1.7. Evaluating performance](python-interface/getting-started.md#17-evaluating-performance)
+  * [1.7. Complete example](python-interface/getting-started.md#17-complete-example)
 * [2. Concepts](python-interface/concepts.md)
   * [2.1. Pragmatic format in Python](python-interface/concepts.md#21-pragmatic-format-in-python)
     * [2.1.1. Modeling a problem](python-interface/concepts.md#211-modeling-a-problem)
@@ -40,11 +53,12 @@
   * [4.2. Development](python-interface/internals.md#42-development)
   * [4.3. Algorithms](python-interface/internals.md#43-algorithms)
 
-## Solver interface at a glance
+## Solver Interface at a Glance
 
 ```python
 from vrp_cli import Config, Problem, Recreate, RoutingMatrix, solve
 
+# 1. 建模 (Modeling)
 problem = (
     Problem.empty()
     .add_delivery(
@@ -62,39 +76,33 @@ problem = (
         end_latest="2019-07-04T18:00:00Z",
         capacity=[10],
         costs={"fixed": 22, "distance": 0.0002, "time": 0.005},
+        profile="normal_car",
     )
 )
 
+# 2. 路由数据 (Routing Data)
 matrix = RoutingMatrix(
     profile="normal_car",
     durations=[0, 609, 609, 0],
     distances=[0, 3840, 3840, 0],
 )
 
+# 3. 求解配置 (Solver Configuration)
 config = Config(max_time=5, max_generations=1000).set_initial(
     Recreate.cheapest(),
     alternatives=[Recreate.farthest(), Recreate.regret(2, 3)],
 )
 
+# 4. 执行求解 (Execution)
 solution = solve(problem, matrices=[matrix], config=config)
+
+# 5. 分析结果 (Analysis)
 print(solution.statistic)
 ```
 
-## Relationship with the original Rust project
+## Recommended Reading Path
 
-Python Interface 继承原 Rust 项目的核心概念：pragmatic problem、routing matrix、solution model、constraints、objectives、checker 和 heuristic solver。差异在于：
-
-| 原 Rust/CLI 工作流 | Python Interface 工作流 |
-| --- | --- |
-| 编写 JSON 文件后用 CLI 求解。 | 在 Python 中用 builder 或 JSON asset 构造问题并直接调用 `solve`。 |
-| routing matrix 以 pragmatic JSON 字段传递。 | Python 中可使用 `RoutingMatrix(durations=..., distances=...)`，序列化时自动转换为 `travelTimes`。 |
-| 输出 JSON 需要用户自行解析。 | `Solution` 提供 `statistic`、`tours`、`unassigned`、`geojson`、`iter_tours()` 等访问入口。 |
-| 中间迭代状态主要面向内部 solver。 | `on_iteration` 回调和 `SolveTracker` 可以在 Python 中记录、展示和分析优化过程。 |
-| 二次开发主要在 Rust crate 内完成。 | Python facade 可继续扩展 builder、config helper、可视化数据和上层应用集成。 |
-
-## Recommended reading path
-
-1. 第一次使用：阅读 [Getting Started](python-interface/getting-started.md)，复制最小示例跑通求解。
-2. 需要建模复杂业务：阅读 [Concepts](python-interface/concepts.md)，理解 jobs、vehicles、resources、relations、objectives、routing data 和 solution model。
-3. 需要找可运行样例：阅读 [Examples](python-interface/examples.md)，选择与业务最接近的脚本。
-4. 需要扩展接口：阅读 [Internals](python-interface/internals.md) 和更细的开发文档。
+1. **第一次使用**：阅读 [Getting Started](python-interface/getting-started.md)，复制并运行最小示例以跑通求解流程。
+2. **需要建模复杂业务**：阅读 [Concepts](python-interface/concepts.md)，深入理解 jobs、vehicles、resources、relations、objectives、routing data 及 solution model 等核心概念。
+3. **需要寻找可运行的样例代码**：阅读 [Examples](python-interface/examples.md)，挑选与实际业务场景最接近的脚本作为基础。
+4. **需要扩展底层或阅读源码**：阅读 [Internals](python-interface/internals.md) 及其相关的深度开发文档。
