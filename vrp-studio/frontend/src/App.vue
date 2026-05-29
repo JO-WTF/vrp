@@ -351,6 +351,10 @@ const typeEmojiMap: Record<string, string> = {
 }
 
 
+// ECharts draws built-in symbols as filled vector shapes. Keep job type
+// distinction in the symbol itself instead of overlaying unicode emoji labels:
+// overlay text is font-dependent and made some markers look hollow or partially
+// filled (notably the pickup triangle).
 const typeSymbolMap: Record<string, string> = {
   departure: 'rect',
   arrival: 'rect',
@@ -362,7 +366,7 @@ const typeSymbolMap: Record<string, string> = {
   service: 'triangle',
   stop: 'circle',
   replacement: 'diamond',
-  unassigned: 'diamond',
+  unassigned: 'path://M-6,-6 L-2,-6 L0,-2 L2,-6 L6,-6 L2,0 L6,6 L2,6 L0,2 L-2,6 L-6,6 L-2,0 Z',
 }
 
 const typeSymbolRotateMap: Record<string, number> = {
@@ -385,17 +389,8 @@ const getEChartPointStyle = (actType: string, vehicleColor: string, symbolSize =
   },
 })
 
-const getEChartPointLabel = (actType: string) => ({
-  show: true,
-  formatter: getTypeEmoji(actType),
-  color: '#0f172a',
-  fontSize: 12,
-  fontWeight: 700,
-})
-
 const getEChartDataPointStyle = (actType: string, vehicleColor: string, symbolSize = 12) => ({
   ...getEChartPointStyle(actType, vehicleColor, symbolSize),
-  label: getEChartPointLabel(actType),
 })
 
 const getStopColor = (stop: any) => {
