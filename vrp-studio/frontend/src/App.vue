@@ -2114,8 +2114,8 @@ setInterval(() => {
 
 :global(.vrp-tooltip-section-title) {
   margin-bottom: 4px;
-  color: #cbd5e1;
-  font-weight: 700;
+  color: #f8fafc;
+  font-weight: 800;
 }
 
 :global(.vrp-tooltip-tw-row) {
@@ -2124,16 +2124,27 @@ setInterval(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #e2e8f0;
+  color: #ffffff;
+  font-weight: 600;
 }
 
 :global(.vrp-tooltip-empty) {
-  color: #94a3b8;
+  color: #cbd5e1;
 }
 
 :global(.mapboxgl-popup-content) {
   max-width: 360px;
   white-space: normal;
+  color: #f8fafc;
+  background: rgba(15, 23, 42, 0.95);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.35);
+}
+
+:global(.mapboxgl-popup-tip) {
+  border-top-color: rgba(15, 23, 42, 0.95);
+  border-right-color: rgba(15, 23, 42, 0.95);
+  border-bottom-color: rgba(15, 23, 42, 0.95);
+  border-left-color: rgba(15, 23, 42, 0.95);
 }
 
 </style>
