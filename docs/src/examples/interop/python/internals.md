@@ -1,6 +1,6 @@
-# 4. Internals
+# 3. Internals
 
-## 4.1. Overview
+## 3.1. Overview
 
 Python Interface 的内部架构分为四层：
 
@@ -17,7 +17,7 @@ PyO3 native module (`vrp_cli._vrp_cli`)
 Rust VRP solver / checker / converter
 ```
 
-### 4.1.1. Python facade
+### 3.1.1. Python facade
 
 主要职责：
 
@@ -30,12 +30,10 @@ Rust VRP solver / checker / converter
 
 详细模块文档：
 
-- [`assets-and-builders.md`](assets-and-builders.md)
-- [`config-and-heuristics.md`](config-and-heuristics.md)
-- [`solve-bindings-and-results.md`](solve-bindings-and-results.md)
-- [`visualization-tracker.md`](visualization-tracker.md)
+- [Assets & Builders](internals/assets-builders.md)
+- [Visualization Tracker](internals/visualization.md)
 
-### 4.1.2. Native binding
+### 3.1.2. Native binding
 
 PyO3 binding 暴露 Rust 能力：
 
@@ -49,7 +47,7 @@ PyO3 binding 暴露 Rust 能力：
 | `convert_to_pragmatic` | `convert_to_pragmatic` | 外部格式转换。 |
 | `get_locations` | `get_routing_locations` | 提取 routing locations。 |
 
-### 4.1.3. Data contract
+### 3.1.3. Data contract
 
 所有跨 Python/Rust 边界的数据都应满足：
 
@@ -58,9 +56,9 @@ PyO3 binding 暴露 Rust 能力：
 - 错误信息可追踪到 problem/config/matrix/solution。
 - callback 传递的是 snapshot，不应在回调中修改 solver 内部状态。
 
-## 4.2. Development
+## 3.2. Development
 
-### 4.2.1. Project structure
+### 3.2.1. Project structure
 
 | 路径 | 说明 |
 | --- | --- |
@@ -69,9 +67,9 @@ PyO3 binding 暴露 Rust 能力：
 | `vrp-cli/src/lib.rs` | FFI、WASM、PyO3 binding 入口。 |
 | `vrp-cli/python/tests/` | Python facade 和 native binding 测试。 |
 | `examples/python-interop/` | Python 使用示例。 |
-| `docs/python-interface/` | Python Interface 使用和二次开发文档。 |
+| `docs/src/examples/interop/python/` | Python Interface 使用和二次开发文档。 |
 
-### 4.2.2. Solver extension
+### 3.2.2. Solver extension
 
 新增能力时先判断扩展点：
 
@@ -84,17 +82,17 @@ PyO3 binding 暴露 Rust 能力：
 | 新增结果字段访问 | `Solution`、`TourView` 或 `StopView`。 |
 | 新增可视化指标 | `SolveTracker` 和 VRP Studio snapshot。 |
 
-更细流程见：[`development-guide.md`](development-guide.md)。
+更细流程见：[Development Guide](internals/development.md)。
 
-### 4.2.3. Development practices
+### 3.2.3. Development practices
 
-- Python helper 不应改变 solver 语义，只负责生成 solver 已理解的 JSON。
+- Python helper 不应改变 solver 语义，只负责生成 solver 已理解 of JSON。
 - 如果 schema 可变或高级，保留 raw dict 入口。
 - Public API 新增后必须有测试和示例。
 - 对 callback、initial solution、matrix list 等路径要覆盖组合场景。
 - 文档中的代码片段应能直接复制或说明前置条件。
 
-### 4.2.4. Testing
+### 3.2.4. Testing
 
 常用测试：
 
@@ -110,7 +108,7 @@ python examples/python-interop/basic.py
 - 标题层级符合文档结构。
 - 示例命令和 API 名称与代码一致。
 
-## 4.3. Algorithms
+## 3.3. Algorithms
 
 Python Interface 不重新实现算法。核心算法仍由 Rust solver 提供，包括：
 

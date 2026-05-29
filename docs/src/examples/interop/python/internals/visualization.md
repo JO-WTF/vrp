@@ -9,14 +9,17 @@
 | 主要源码 | `vrp-cli/python/vrp_cli/vis/tracker.py`, `vrp-cli/python/vrp_cli/vis/server.py` |
 | 目标读者 | 需要记录 solver 轨迹、接入 dashboard 或扩展 VRP Studio 数据的开发者 |
 
+---
+
 ## 1. 设计目标
 
 `vrp_cli.vis` 的目标是把 `solve(on_iteration=...)` 产生的中间解转换为稳定的历史数据，供前端可视化、实验复盘或调试分析使用。它不参与求解，只消费 problem metadata 和 solution snapshot。
 
+---
+
 ## 2. SolveTracker 职责
 
 `SolveTracker` 负责：
-
 - 提供可直接传给 `solve` 的 `callback(generation, solution)`。
 - 仅在发现新 best solution 时记录 snapshot，降低历史数据体积。
 - 在 `finish()` 中补写最终 snapshot，保证可视化有结束状态。
@@ -30,6 +33,8 @@ tracker = SolveTracker(run_name="demo", problem=problem)
 solution = solve(problem, matrices=[matrix], config=config, on_iteration=tracker.callback, every=10)
 tracker.finish()
 ```
+
+---
 
 ## 3. History JSON 契约
 
@@ -63,10 +68,11 @@ tracker.finish()
 
 新增字段时应保持旧字段不删除，并允许前端在字段缺失时降级。
 
+---
+
 ## 4. Job Metadata 契约
 
 `_extract_jobs_meta(problem)` 从 problem 提取 job 相关信息，常见字段包括：
-
 - job type：pickup、delivery、service、replacement。
 - places：location、duration、time windows。
 - demand。
@@ -76,19 +82,21 @@ tracker.finish()
 - placesByType。
 
 这些 metadata 用于 tooltip、unassigned 展示、Gantt 和 Data Inspector。扩展 metadata 时应注意：
-
 - 不要改变已有字段含义。
 - 新字段优先作为可选字段加入。
 - 对多 place、多 task type 的 job 保留类型分组。
 - 需要考虑未分配任务只有 job id、没有完整 activity 的情况。
 
+---
+
 ## 5. Flush 与文件写入
 
 Tracker 使用临时文件再替换目标文件的方式写入，降低写到一半被前端读取的风险。扩展时应保持：
-
 - JSON 始终可解析。
 - 文件路径由 `save_dir` 和 `run_name` 控制。
 - 大量 snapshot 场景下避免每代无条件 flush。
+
+---
 
 ## 6. 静态可视化服务
 
@@ -96,16 +104,19 @@ Tracker 使用临时文件再替换目标文件的方式写入，降低写到一
 
 二次开发时，如果只是调整 tracker 输出，不一定需要修改 server；如果改变前端资源路径或 dist 结构，才需要同步调整。
 
+---
+
 ## 7. 与 VRP Studio 的关系
 
 `SolveTracker` 是离线/轻量记录工具；VRP Studio 则是实时 WebSocket 工具。两者共享的设计思想是：
-
 - 通过 callback 获取中间 solution。
 - 将 solution 压缩为 snapshot。
 - 提取 problem metadata 帮助前端解释 job。
 - 保持 history 数据结构稳定。
 
 如果要新增前端展示字段，应优先定义通用 snapshot 字段，再分别接入 tracker 和 Studio 后端，避免两套可视化输出分裂。
+
+---
 
 ## 8. 测试建议
 
@@ -117,10 +128,11 @@ Tracker 使用临时文件再替换目标文件的方式写入，降低写到一
 | JSON 写入 | history 文件可解析，顶层字段完整。 |
 | 向后兼容 | 旧前端依赖字段不被删除或改名。 |
 
+---
+
 ## 9. 扩展示例
 
 新增一个 `lateness` 指标的推荐路径：
-
 1. 确认 `Solution.statistic` 或 stops 中已有 lateness 来源。
 2. 在 `_record` 中读取并写入 `lateness` 字段。
 3. 保留原始 `statistic`。
