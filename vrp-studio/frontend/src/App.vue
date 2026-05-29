@@ -483,10 +483,9 @@ const mapChartOption = computed(() => {
     }
   }
 
-  const series: any[] = []
   let isGeo = false
   let isIndex = false
-  
+
   currentStep.tours.forEach((tour: any) => {
     if (tour.stops && tour.stops.length > 0) {
       const loc = tour.stops[0].location
@@ -497,25 +496,27 @@ const mapChartOption = computed(() => {
 
   isGeoMode.value = isGeo
 
-  // Use Mapbox only when a token is configured. Otherwise, render geo coordinates with ECharts.
+  // Use Mapbox only when a token is configured. Otherwise, keep the old ECharts coordinate view.
   if (isGeo && mapboxToken.value) {
     return {}
   }
 
+  const series: any[] = []
+  let hasValidCoords = false
   const graphNodes = new Map<string, any>()
   const graphLinks: any[] = []
-  const geoLineSeries: any[] = []
-  const geoScatterData: any[] = []
 
   currentStep.tours.forEach((tour: any) => {
     const color = getVehicleColor(tour.vehicleId)
+    const coords: [number, number][] = []
+    const scatterData: any[] = []
     let prevNodeId: string | null = null
 
     tour.stops.forEach((stop: any, stopIndex: number) => {
       const hasGeo = stop.location?.lng !== undefined && stop.location?.lat !== undefined
       const hasIdx = stop.location?.index !== undefined
       if (!hasGeo && !hasIdx) return
-      
+
       const activities = stop.activities || []
       const primaryActivity = activities[0]
       const jobId: string = primaryActivity?.jobId ?? ''
@@ -540,48 +541,18 @@ const mapChartOption = computed(() => {
       const twStr = timeWindows?.length
         ? timeWindows.map((tw: any[]) => `${tw[0]} – ${tw[1]}`).join(', ')
         : undefined
-        
+
       const skillsObj = jm?.skills
       let skillsStr = '—'
       if (skillsObj) {
-         const parts = []
-         if (skillsObj.allOf?.length) parts.push(`All: ${skillsObj.allOf.join(', ')}`)
-         if (skillsObj.anyOf?.length) parts.push(`Any: ${skillsObj.anyOf.join(', ')}`)
-         if (skillsObj.noneOf?.length) parts.push(`None: ${skillsObj.noneOf.join(', ')}`)
-         if (parts.length) skillsStr = parts.join(' | ')
+        const parts = []
+        if (skillsObj.allOf?.length) parts.push(`All: ${skillsObj.allOf.join(', ')}`)
+        if (skillsObj.anyOf?.length) parts.push(`Any: ${skillsObj.anyOf.join(', ')}`)
+        if (skillsObj.noneOf?.length) parts.push(`None: ${skillsObj.noneOf.join(', ')}`)
+        if (parts.length) skillsStr = parts.join(' | ')
       }
-      
-      let shape = 'circle'
-      let size = 8
-      switch (primaryActivity?.type) {
-        case 'departure':
-        case 'arrival':
-        case 'depot':
-          shape = 'rect'
-          size = 12
-          break
-        case 'pickup':
-          shape = 'triangle'
-          size = 10
-          break
-        case 'delivery':
-          shape = 'circle'
-          size = 8
-          break
-        case 'recharge':
-          shape = 'diamond'
-          size = 12
-          break
-        case 'break':
-          shape = 'roundRect'
-          size = 10
-          break
-        default:
-          shape = 'circle'
-          size = 8
-          break
-      }
-      
+
+      const isDepot = primaryActivity?.type === 'departure' || primaryActivity?.type === 'arrival' || primaryActivity?.type === 'depot'
       const stopMeta = {
         jobId,
         pointLabel,
@@ -600,31 +571,34 @@ const mapChartOption = computed(() => {
       }
 
       if (isGeo && hasGeo) {
-        geoScatterData.push({
-          value: [stop.location.lng, stop.location.lat],
+        const x = stop.location.lng
+        const y = stop.location.lat
+        coords.push([x, y])
+        hasValidCoords = true
+        scatterData.push({
           name: pointLabel,
-          symbol: shape,
-          symbolSize: size,
-          itemStyle: { color },
+          value: [x, y],
+          symbol: isDepot ? 'rect' : 'circle',
+          symbolSize: isDepot ? 12 : 8,
           stopMeta
         })
       }
 
       if (isIndex && hasIdx) {
+        hasValidCoords = true
         const nodeId = `loc_${stop.location.index}`
-        const isDepot = primaryActivity?.type === 'departure' || primaryActivity?.type === 'arrival' || primaryActivity?.type === 'depot'
-        
+
         if (!graphNodes.has(nodeId)) {
           graphNodes.set(nodeId, {
             id: nodeId,
             name: pointLabel,
-            symbol: shape,
-            symbolSize: size * 1.5,
+            symbol: isDepot ? 'rect' : 'circle',
+            symbolSize: isDepot ? 18 : 12,
             itemStyle: { color: isDepot ? color : undefined },
             stopMeta
           })
         }
-        
+
         if (prevNodeId !== null && prevNodeId !== nodeId) {
           graphLinks.push({
             source: prevNodeId,
@@ -637,49 +611,89 @@ const mapChartOption = computed(() => {
     })
 
     if (isGeo) {
-      const coords = tour.stops
-        .map((stop: any) => stop.location)
-        .filter((loc: any) => loc?.lng !== undefined && loc?.lat !== undefined)
-        .map((loc: any) => [loc.lng, loc.lat])
+      const lineTooltip = {
+        formatter: () => {
+          return [
+            `<b>${tour.vehicleId}</b>`,
+            `Distance: ${tour.statistic?.distance ?? 'N/A'}`,
+            `Duration: ${tour.statistic?.duration != null ? fmtSecs(tour.statistic.duration) : 'N/A'}`
+          ].join('<br/>')
+        }
+      }
 
       if (coords.length > 1) {
-        geoLineSeries.push({
-          type: 'line',
-          data: coords,
-          showSymbol: false,
-          lineStyle: { color, width: 2, opacity: 0.8 },
-          emphasis: { lineStyle: { width: 4 } }
+        series.push({
+          type: 'lines',
+          coordinateSystem: 'cartesian2d',
+          data: [{ coords: [coords[0], coords[1]] }],
+          lineStyle: { color, width: 2.2, opacity: 0.9, type: 'solid' },
+          zlevel: 1,
+          tooltip: lineTooltip
+        })
+      }
+
+      if (coords.length > 2) {
+        series.push({
+          type: 'lines',
+          coordinateSystem: 'cartesian2d',
+          polyline: true,
+          data: [{ coords: coords.slice(1) }],
+          lineStyle: { color, width: 2.2, opacity: 0.6, type: 'dashed' },
+          zlevel: 1,
+          tooltip: lineTooltip
+        })
+      }
+
+      if (scatterData.length > 0) {
+        series.push({
+          type: 'scatter',
+          coordinateSystem: 'cartesian2d',
+          data: scatterData,
+          itemStyle: { color },
+          zlevel: 2,
+          tooltip: {
+            formatter: (params: any) => {
+              const m = params.data?.stopMeta || {}
+              const lines = [
+                `<b>${m.vehicleId}</b> · ${m.pointLabel}`,
+                `Type: ${m.actType}`,
+                `Lat/Lng: ${fmtCoord(m.lat)}, ${fmtCoord(m.lng)}`,
+                `Arrival: ${m.arrival}`,
+                `Departure: ${m.departure}`,
+                `Actual service: ${m.actualSvc}`,
+                `Planned service: ${m.plannedSvc}`,
+                `Time window: ${m.timeWindows}`,
+                `Skills: ${m.skills}`,
+                `Distance: ${m.distance}`,
+                `Load: ${m.load}`,
+              ]
+              return lines.join('<br/>')
+            }
+          }
         })
       }
     }
   })
 
-  if (isGeo) {
-    series.push(
-      ...geoLineSeries,
-      {
+  if (isGeo && currentStep.unassigned?.length) {
+    const unassignedData = currentStep.unassigned
+      .filter((item: any) => item.location?.lng !== undefined)
+      .map((item: any) => ({
+        name: item.jobId || 'Unassigned',
+        value: [item.location.lng, item.location.lat]
+      }))
+
+    if (unassignedData.length > 0) {
+      series.push({
         type: 'scatter',
-        data: geoScatterData,
-        tooltip: {
-          formatter: (params: any) => {
-            const m = params.data?.stopMeta || {}
-            return [
-              `<b>${m.vehicleId || 'N/A'}</b> · ${m.pointLabel}`,
-              `Type: ${m.actType}`,
-              `Lng/Lat: ${m.lng}, ${m.lat}`,
-              `Arrival: ${m.arrival}`,
-              `Departure: ${m.departure}`,
-              `Actual service: ${m.actualSvc}`,
-              `Planned service: ${m.plannedSvc}`,
-              `Time window: ${m.timeWindows}`,
-              `Skills: ${m.skills}`,
-              `Distance: ${m.distance}`,
-              `Load: ${m.load}`,
-            ].join('<br/>')
-          }
-        }
-      }
-    )
+        coordinateSystem: 'cartesian2d',
+        data: unassignedData,
+        symbolSize: 6,
+        itemStyle: { color: '#94a3b8' },
+        zlevel: 2,
+        tooltip: { formatter: (params: any) => `Unassigned: ${params.name}` }
+      })
+    }
   }
 
   if (isIndex) {
@@ -719,19 +733,56 @@ const mapChartOption = computed(() => {
     })
   }
 
-  const baseOption: any = {
+  if (!hasValidCoords) {
+    return {
+      backgroundColor: 'transparent',
+      title: {
+        text: 'No valid coordinates found',
+        left: 'center',
+        top: 'center',
+        textStyle: { color: '#cbd5e1', fontSize: 16 }
+      }
+    }
+  }
+
+  if (isGeo) {
+    return {
+      title: { show: false },
+      animationDuration: 300,
+      animationDurationUpdate: 300,
+      backgroundColor: 'transparent',
+      tooltip: { trigger: 'item' },
+      grid: { left: 16, right: 16, top: 16, bottom: 16, containLabel: false },
+      xAxis: {
+        type: 'value',
+        scale: true,
+        axisLine: { show: false },
+        axisLabel: { show: false },
+        splitLine: { show: false }
+      },
+      yAxis: {
+        type: 'value',
+        scale: true,
+        axisLine: { show: false },
+        axisLabel: { show: false },
+        splitLine: { show: false }
+      },
+      dataZoom: [
+        { type: 'inside', xAxisIndex: 0, filterMode: 'none' },
+        { type: 'inside', yAxisIndex: 0, filterMode: 'none' }
+      ],
+      series
+    }
+  }
+
+  return {
     title: { show: false },
     animationDuration: 300,
     animationDurationUpdate: 300,
     backgroundColor: 'transparent',
     tooltip: { trigger: 'item' },
-    xAxis: isGeo ? { type: 'value', scale: true, name: 'lng', axisLine: { lineStyle: { color: '#64748b' } } } : undefined,
-    yAxis: isGeo ? { type: 'value', scale: true, name: 'lat', axisLine: { lineStyle: { color: '#64748b' } } } : undefined,
-    grid: isGeo ? { left: 48, right: 24, top: 24, bottom: 40 } : undefined,
     series
   }
-
-  return baseOption
 })
 
 onMounted(() => {
@@ -1489,6 +1540,7 @@ setInterval(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  height: 100%;
 }
 
 .insight-card :deep(.ant-card-body) {
@@ -1589,6 +1641,7 @@ setInterval(() => {
 .chart-shell {
   flex: 1;
   min-height: 0;
+  height: 100%;
   border-radius: 18px;
   overflow: hidden;
   background: linear-gradient(180deg, rgba(15, 23, 42, 0.65), rgba(15, 23, 42, 0.25));
@@ -1752,13 +1805,16 @@ setInterval(() => {
 }
 
 .main-tabs {
-  height: 650px;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
+.main-tabs :deep(.ant-tabs-content-holder),
 .main-tabs :deep(.ant-tabs-content) {
   flex: 1;
+  min-height: 0;
   height: 100%;
 }
 
