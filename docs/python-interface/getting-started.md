@@ -19,40 +19,208 @@ Python Interface 让 Rust VRP 求解器可以作为 Python 求解器程序使用
 
 ## 1.2. Installation
 
-### 1.2.1. Runtime installation
+Python Interface 依赖一个带 PyO3 native extension 的 `vrp-cli` Python 包。安装时需要同时处理 Python 环境、Rust toolchain 和 maturin 构建。根据使用场景不同，推荐三种安装路径：
 
-Python Interface 需要安装包含 native extension 的 `vrp-cli` Python 包。开发环境中推荐使用 `maturin`：
+| 场景 | 推荐方式 | 说明 |
+| --- | --- | --- |
+| 只想在本仓库中运行示例和二次开发 | 使用仓库根目录 `build.sh` / `build.ps1` | 自动创建/复用 `.venv`、构建 Rust、构建 wheel 并安装。 |
+| 正在开发 Python facade 或 native binding | 使用 `maturin develop` | 将 extension 直接安装到当前虚拟环境，适合快速迭代。 |
+| 需要分发到其他 Python 项目 | 使用 `maturin build` 生成 wheel 后安装 | 适合 CI、发布或离线部署。 |
+
+### 1.2.1. Prerequisites
+
+安装前请确认以下依赖可用：
+
+| 依赖 | 版本/要求 | 用途 | 检查命令 |
+| --- | --- | --- | --- |
+| Python | 3.10+ | 运行 Python facade 和构建 extension | `python --version` |
+| Rust toolchain | stable | 编译 Rust solver 和 PyO3 extension | `rustc --version` / `cargo --version` |
+| pip 或 uv | 任一可用 | 安装 Python 构建依赖和 wheel | `python -m pip --version` / `uv --version` |
+| maturin | `vrp-cli/requirements.txt` 中声明 `maturin>=1.0` | 构建 PyO3 wheel | `maturin --version` |
+
+如果尚未安装 Rust，可先安装 Rust stable toolchain。Linux/macOS 通常使用 rustup；Windows 建议使用 rustup 并准备好 C++ build tools。
+
+### 1.2.2. Recommended repository installation
+
+在仓库根目录使用项目提供的构建脚本是最稳妥的方式。该脚本会：
+
+1. 创建或复用仓库根目录 `.venv`。
+2. 构建 Rust workspace。
+3. 安装 `vrp-cli/requirements.txt` 中的 Python 构建依赖。
+4. 在 `vrp-cli` 包中调用 maturin 构建 wheel。
+5. 将最新 wheel 安装回 `.venv`。
+6. 运行 `import vrp_cli` 做安装验证。
+
+Linux/macOS：
 
 ```bash
+# 推荐：如果已安装 uv，脚本会自动创建 .venv
+./build.sh
+
+# 清理后重新构建
+./build.sh --clean
+
+# 只构建/安装 Python binding，跳过 Rust workspace 预构建
+./build.sh --no-rust
+
+# 调试构建
+./build.sh --debug
+```
+
+Windows PowerShell：
+
+```powershell
+# 推荐：如果已安装 uv，脚本会自动创建 .venv
+.\build.ps1
+
+# 清理后重新构建
+.\build.ps1 -Clean
+
+# 只构建/安装 Python binding，跳过 Rust workspace 预构建
+.\build.ps1 -NoRust
+
+# 调试构建
+.\build.ps1 -Debug
+```
+
+如果没有安装 `uv`，请先手动创建 `.venv`：
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip
+./build.sh
+```
+
+Windows：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+.\build.ps1
+```
+
+### 1.2.3. Manual development installation with maturin
+
+如果你正在修改 `vrp-cli/python/vrp_cli` 或 `vrp-cli/src/lib.rs`，推荐使用 `maturin develop`，它会把当前源码构建并安装到已激活的虚拟环境中。
+
+Linux/macOS：
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r vrp-cli/requirements.txt
+cd vrp-cli
 maturin develop --features py_bindings
+cd ..
 ```
 
-如果要构建 wheel：
+Windows PowerShell：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r vrp-cli\requirements.txt
+cd vrp-cli
+maturin develop --features py_bindings
+cd ..
+```
+
+也可以使用 `uv`：
 
 ```bash
-maturin build --release --features py_bindings
+uv venv .venv
+uv pip install --python .venv/bin/python -r vrp-cli/requirements.txt
+cd vrp-cli
+uv run --python ../.venv/bin/python maturin develop --features py_bindings
+cd ..
 ```
 
-### 1.2.2. Development dependencies
+> 注意：`maturin develop` 应在包含 `vrp-cli/pyproject.toml` 的目录中执行，或显式指定 manifest。仓库根目录的 `pyproject.toml` 是 uv workspace 配置，不是 PyO3 包构建配置。
 
-二次开发通常需要：
+### 1.2.4. Wheel build and installation
 
-- Python 3.10+
-- Rust stable toolchain
-- `maturin`
-- 可选：`uv`，用于 workspace Python 包管理
+如果需要把 Python Interface 安装到其他 Python 项目或部署环境，可以先构建 wheel：
 
-验证 native binding 是否能编译：
+```bash
+cd vrp-cli
+maturin build --release --features py_bindings
+cd ..
+```
+
+构建产物默认位于仓库根目录的 `target/wheels/`。安装最新 wheel：
+
+```bash
+python -m pip install --force-reinstall target/wheels/vrp_cli-*.whl
+```
+
+Windows PowerShell：
+
+```powershell
+python -m pip install --force-reinstall (Get-ChildItem target\wheels\vrp_cli-*.whl | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+```
+
+### 1.2.5. Verification
+
+安装完成后，先验证 Python package 和 native extension 都可导入：
+
+```bash
+python - <<'PY'
+import vrp_cli
+from vrp_cli import Problem, RoutingMatrix, Config, solve
+print("vrp_cli imported from:", vrp_cli.__file__)
+print("public API sample:", Problem, RoutingMatrix, Config, solve)
+PY
+```
+
+再运行一个仓库示例：
+
+```bash
+python examples/python-interop/run_pragmatic_example.py --list
+python examples/python-interop/run_pragmatic_example.py simple.basic.problem.json
+```
+
+如果你使用 `.venv` 但没有激活环境，可以直接使用虚拟环境 Python：
+
+```bash
+.venv/bin/python examples/python-interop/run_pragmatic_example.py simple.basic.problem.json
+```
+
+Windows：
+
+```powershell
+.\.venv\Scripts\python.exe examples\python-interop\run_pragmatic_example.py simple.basic.problem.json
+```
+
+### 1.2.6. Development checks
+
+二次开发时建议至少执行：
 
 ```bash
 cargo check --features py_bindings
-```
-
-运行 Python facade 测试：
-
-```bash
 python -m unittest discover -s vrp-cli/python/tests
+python examples/python-interop/basic.py
 ```
+
+这些命令分别验证：
+
+- Rust/PyO3 binding 可以编译。
+- Python facade 测试通过。
+- 安装后的 package 可以真实运行一个求解示例。
+
+### 1.2.7. Troubleshooting
+
+| 问题 | 常见原因 | 处理方式 |
+| --- | --- | --- |
+| `cargo: command not found` | 未安装 Rust 或 PATH 未生效 | 安装 Rust stable toolchain，并重新打开 shell。 |
+| `maturin: command not found` | 当前环境未安装 maturin | 执行 `python -m pip install -r vrp-cli/requirements.txt`。 |
+| `No module named vrp_cli` | wheel 未安装到当前 Python 环境 | 确认已激活 `.venv`，或使用 `.venv/bin/python` / `.venv\Scripts\python.exe`。 |
+| `No module named vrp_cli._vrp_cli` | Python 源码可见但 native extension 未构建/安装 | 重新执行 `maturin develop --features py_bindings` 或 `./build.sh`。 |
+| `pip not found in .venv` | Python 环境缺少 ensurepip/pip | 使用 `uv venv .venv`，或安装系统的 python venv/ensurepip 支持后重建 `.venv`。 |
+| Windows 编译失败 | 缺少 MSVC/C++ build tools | 安装 Visual Studio Build Tools 的 C++ workload 后重试。 |
 
 ## 1.3. Defining problem
 
