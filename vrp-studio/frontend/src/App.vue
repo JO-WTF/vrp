@@ -636,7 +636,12 @@ const ganttChartOption = computed(() => {
     tooltip: {
       formatter: (params: any) => {
         const d = params.value
-        return `<b>${params.name}</b><br/>Type: ${d[3]}<br/>Arrival: ${new Date(d[1]).toLocaleTimeString()}<br/>Departure: ${new Date(d[2]).toLocaleTimeString()}`
+        return [
+          `<b>${escapeHtml(params.name)}</b>`,
+          `Type: ${escapeHtml(d[3])}`,
+          `Arrival: ${escapeHtml(formatDateTime(d[1]))}`,
+          `Departure: ${escapeHtml(formatDateTime(d[2]))}`,
+        ].join('<br/>')
       },
       backgroundColor: 'rgba(15, 23, 42, 0.9)',
       textStyle: { color: '#f8fafc' }
@@ -645,7 +650,7 @@ const ganttChartOption = computed(() => {
     xAxis: {
       type: 'time',
       axisLine: { lineStyle: { color: '#334155' } },
-      axisLabel: { color: '#94a3b8' },
+      axisLabel: { color: '#94a3b8', formatter: (value: unknown) => formatDateTime(value) },
       splitLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.12)' } }
     },
     yAxis: {
@@ -1477,7 +1482,7 @@ setInterval(() => {
                               <span :style="{ color: getStopColor(stop), marginRight: '4px' }">{{ getStopEmoji(stop) }}</span>
                               <b>{{ stop.activities?.[0]?.jobId || stop.activities?.[0]?.type }}</b>
                               <span style="color: #94a3b8; margin-left: 8px;">
-                                Arr: {{ new Date(stop.time?.arrival).toLocaleTimeString() }} | Dep: {{ new Date(stop.time?.departure).toLocaleTimeString() }}
+                                Arr: {{ formatDateTime(stop.time?.arrival) }} | Dep: {{ formatDateTime(stop.time?.departure) }}
                               </span>
                             </a-timeline-item>
                           </a-timeline>
