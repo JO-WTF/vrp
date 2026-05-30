@@ -441,7 +441,122 @@ matrices = MatrixCollection()
 matrices.add_time_dependent(profile="normal_car", timestamp_to_data=timestamp_data)
 ```
 
-## 2.1.3. Solution model
+## 2.1.3. Solver configuration and execution
+
+Python Interface 将求解配置拆成两个层面：
+
+* `Config` 描述 solver 如何运行，包括终止条件、并行度、telemetry、population、initial solution 构造策略以及 hyper heuristic。
+* `solve` 描述一次求解调用需要哪些输入，包括 problem、routing matrices、config、可选初始解和迭代回调。
+
+### Config asset
+
+`Config` 最终会序列化为 native solver 可识别的 pragmatic config JSON。对于常见场景，可以直接使用快捷构造参数：
+
+```python
+from vrp_cli import Config
+
+config = Config(
+    max_time=60,
+    max_generations=5000,
+    parallelism=4,
+    include_geojson=True,
+)
+```
+
+这些快捷参数会被写入对应的 config 分区：
+
+| Python 参数 | 类型 | Pragmatic config 字段 | 说明 |
+| --- | --- | --- | --- |
+| `data` | `dict` 或 `None` | 完整 config JSON | 直接传入完整 pragmatic config JSON；传入后其他快捷参数通常不需要再指定。 |
+| `max_time` | `int` | `termination.maxTime` | 最大运行秒数，必须大于 0。 |
+| `max_generations` | `int` | `termination.maxGenerations` | 最大迭代代数，必须大于 0。 |
+| `parallelism` | `int`、`Sequence[int]` 或 `dict` | `environment.parallelism` | solver 并行配置。 |
+| `include_geojson` | `bool` | `output.includeGeojson` | 是否在解中返回 GeoJSON。 |
+| `evolution` | `dict` | `evolution` | 直接覆盖 initial/population 等进化策略配置。 |
+| `hyper` | `dict` | `hyper` | 直接覆盖 hyper heuristic 配置。 |
+| `termination` | `dict` | `termination` | 直接传完整终止条件配置。 |
+| `telemetry` | `dict` | `telemetry` | 运行过程进度和 metrics 配置。 |
+| `environment` | `dict` | `environment` | logging、experimental、parallelism 等环境配置。 |
+| `output` | `dict` | `output` | 输出格式相关配置。 |
+
+当需要更接近 native config 的细粒度控制时，可以从 JSON 或 dict 加载：
+
+```python
+config = Config.from_json("examples/data/config/config.full.json")
+# 或者
+config = Config.from_dict({"termination": {"maxTime": 60}})
+```
+
+### Config helpers
+
+为了避免手写大量嵌套 JSON，`Config` 提供链式 helper：
+
+```python
+from vrp_cli import Config, Recreate
+
+config = (
+    Config.defaults(max_time=60, max_generations=5000)
+    .set_initial(
+        Recreate.cheapest(),
+        alternatives=[Recreate.farthest(), Recreate.regret(2, 3)],
+    )
+    .set_population_rosomaxa(selection_size=8)
+    .set_hyper_dynamic()
+    .set_progress(enabled=True, log_best=100)
+)
+```
+
+常用 helper 包括：
+
+| Helper | 用途 |
+| --- | --- |
+| `Config.defaults(...)` | 从默认 solver 行为开始，可传 `max_time`、`max_generations`、`variation`。 |
+| `Config.fast()` / `Config.deep()` / `Config.large_scale()` | 根据速度、质量或规模选择预设配置。 |
+| `Config.from_json(path_or_str)` / `Config.from_dict(data)` | 复用已有 config JSON，或与原生 pragmatic config 混合使用。 |
+| `set_termination(...)` / `set_variation(...)` | 配置终止条件和收敛波动停止条件。 |
+| `set_parallelism(...)` / `set_logging(...)` / `set_experimental(...)` | 配置运行环境。 |
+| `set_progress(...)` / `set_metrics(...)` | 配置 telemetry。 |
+| `include_geojson(...)` | 控制输出是否包含 GeoJSON。 |
+| `set_initial(...)` | 配置构造初始解的 recreate 方法及 alternatives。 |
+| `set_population_greedy(...)` / `set_population_elitism(...)` / `set_population_rosomaxa(...)` | 配置 population 策略。 |
+| `set_hyper_dynamic()` / `set_hyper_static(...)` / `set_hyper(...)` | 配置 hyper heuristic。 |
+
+### Solve call
+
+`solve` 的完整签名如下：
+
+```python
+def solve(
+    problem,
+    matrices=None,
+    config=None,
+    *,
+    initial_solution=None,
+    on_iteration=None,
+    every=100,
+):
+    ...
+```
+
+| 参数 | 类型 | 是否必填 | 说明 |
+| --- | --- | --- | --- |
+| `problem` | `Problem`、`dict`、JSON 字符串或路径 | 是 | 待求解的 pragmatic problem。通常传 `Problem` builder 结果或 `Problem.from_json(...)`。 |
+| `matrices` | `Iterable[RoutingMatrix | dict | JSON]` 或 `None` | 否 | 路由矩阵列表。若车辆 profile 依赖矩阵，需传入与 profile 匹配的 `RoutingMatrix`；多 profile 或 time-dependent routing 时通常用 `MatrixCollection.to_list()`。 |
+| `config` | `Config`、`dict`、JSON 字符串或路径 | 否 | 求解配置；不传时使用默认 `Config(max_generations=3000, max_time=300)`。 |
+| `initial_solution` | `InitialSolution`、`dict`、JSON 字符串或路径 | 否 | warm start 初始解，用于从已有路线继续优化或复现实验。 |
+| `on_iteration` | `Callable[[int, Solution], None]` | 否 | 迭代回调；启用后会周期性接收当前 generation 和中间 `Solution`。 |
+| `every` | `int` | 否 | 回调频率，表示每多少代触发一次 `on_iteration`；默认 `100`。 |
+
+启用回调示例：
+
+```python
+def on_iteration(generation, solution):
+    print(generation, solution.total_cost)
+
+solution = solve(problem, matrices=[matrix], config=config, on_iteration=on_iteration, every=50)
+```
+
+## 2.1.4. Solution model
 
 `Solution` 是求解结果的 Python facade。
 
@@ -504,7 +619,7 @@ if not result.is_feasible:
         print(violation)
 ```
 
-## 2.1.4. Error index and validation
+## 2.1.5. Error index and validation
 
 Python Interface 有两类错误来源：
 
