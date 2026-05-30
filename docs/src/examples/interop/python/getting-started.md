@@ -163,6 +163,8 @@ config = Config(max_time=5, max_generations=1000)
 solution = solve(problem, matrices=[matrix], config=config)
 ```
 
+如果需要进一步配置并行度、输出 GeoJSON、初始解或迭代回调，请继续阅读 [Concepts: Solver configuration and execution](concepts.md#213-solver-configuration-and-execution)。
+
 ## 1.6. Analyzing results
 
 求解完成后，`solve` 函数会返回一个 `Solution` 对象。你可以读取关键指标、遍历路线、检查约束或直接导出结果。
